@@ -1,0 +1,9 @@
+{
+  "regions": ["sin1"],
+  "crons": [
+    {
+      "path": "/api/cron/ops-pulse-portal-checks",
+      "schedule": "* * * * *"
+    }
+  ]
+}
