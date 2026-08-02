@@ -17,7 +17,7 @@ import { requireCompanyId } from "@/lib/company-scope";
 import { loadCodLocations } from "@/lib/ops-pulse/cod";
 import { resolveOperatingContext } from "@/lib/ops-pulse/operating-context";
 import { operatingModeForLocation } from "@/lib/ops-pulse/operating-context";
-import { loadPaymentNotificationSnapshot } from "@/lib/payment-notification-counts";
+import { emptyPaymentNotificationSnapshot } from "@/lib/payment-notification-counts";
 import { isOpsRequestHost } from "@/lib/ops-host";
 import { opsNavItemsForMode } from "@/lib/ops-pulse/navigation";
 
@@ -49,7 +49,9 @@ export async function AppShell({ children, active, pageCode }: { children: React
     } : item)
     .filter((item) => item.children?.length ? item.children.length > 0 : hasPermission(authorization, item.code, "access"));
   const inboxNotificationsEnabled = hasPermission(authorization, "inbox", "access");
-  const paymentNotifications = await loadPaymentNotificationSnapshot(authorization);
+  // Do not block every page render on payment badge queries — client loads/polls instead.
+  const paymentNotificationsEnabled = hasPermission(authorization, "payments", "access");
+  const paymentNotifications = emptyPaymentNotificationSnapshot();
   const userMenuProps = {
     action: signOut,
     email: authorization.email,
@@ -68,13 +70,13 @@ export async function AppShell({ children, active, pageCode }: { children: React
           selectedLocationIds={opsContext.selectedLocations.map((location) => location.id)}
         />
       ) : null}
-      <PaymentNotificationBell />
+      {paymentNotificationsEnabled ? <PaymentNotificationBell /> : null}
       <UserMenu {...userMenuProps} />
     </>
   );
 
   return (
-    <PaymentNotificationProvider initialData={paymentNotifications}>
+    <PaymentNotificationProvider enabled={paymentNotificationsEnabled} initialData={paymentNotifications}>
     <AppShellFrame
       desktopActions={topActions}
       mobileActions={topActions}

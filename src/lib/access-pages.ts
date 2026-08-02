@@ -172,17 +172,23 @@ async function upsertPermissionRows(supabase: SupabaseClient, companyId: string,
   const pageIds = Array.from(new Set(rows.map((row) => row.page_id)));
   const { data: existing, error: existingError } = await supabase
     .from("role_page_permissions")
-    .select("role_id, page_id")
+    .select("role_id, page_id, can_view, can_add, can_edit")
     .eq("company_id", companyId)
     .in("role_id", roleIds)
     .in("page_id", pageIds);
   if (existingError) throw new Error(existingError.message);
 
-  const existingKeys = new Set((existing ?? []).map((row) => `${row.role_id}:${row.page_id}`));
+  const existingByKey = new Map(
+    (existing ?? []).map((row) => [`${row.role_id}:${row.page_id}`, row] as const)
+  );
   const insertRows = rows
-    .filter((row) => !existingKeys.has(`${row.role_id}:${row.page_id}`))
+    .filter((row) => !existingByKey.has(`${row.role_id}:${row.page_id}`))
     .map((row) => ({ company_id: companyId, ...row }));
-  const updateRows = rows.filter((row) => existingKeys.has(`${row.role_id}:${row.page_id}`));
+  const updateRows = rows.filter((row) => {
+    const current = existingByKey.get(`${row.role_id}:${row.page_id}`);
+    if (!current) return false;
+    return current.can_view !== row.can_view || current.can_add !== row.can_add || current.can_edit !== row.can_edit;
+  });
 
   if (insertRows.length) {
     const { error } = await supabase.from("role_page_permissions").insert(insertRows);
@@ -200,14 +206,19 @@ async function upsertPermissionRows(supabase: SupabaseClient, companyId: string,
     }
   }
 
-  for (const row of updateRows) {
-    const { error } = await supabase
-      .from("role_page_permissions")
-      .update({ can_view: row.can_view, can_add: row.can_add, can_edit: row.can_edit })
-      .eq("company_id", companyId)
-      .eq("role_id", row.role_id)
-      .eq("page_id", row.page_id);
-    if (error) throw new Error(error.message);
+  for (let i = 0; i < updateRows.length; i += 20) {
+    const chunk = updateRows.slice(i, i + 20);
+    await Promise.all(
+      chunk.map(async (row) => {
+        const { error } = await supabase
+          .from("role_page_permissions")
+          .update({ can_view: row.can_view, can_add: row.can_add, can_edit: row.can_edit })
+          .eq("company_id", companyId)
+          .eq("role_id", row.role_id)
+          .eq("page_id", row.page_id);
+        if (error) throw new Error(error.message);
+      })
+    );
   }
 }
 
@@ -298,66 +309,114 @@ export async function ensureAccessPages(supabase: SupabaseClient, companyId: str
   const now = new Date().toISOString();
   const { data: currentPages, error: currentPagesError } = await supabase
     .from("app_pages")
-    .select("id, code, is_active")
+    .select("id, code, name, sort_order, is_active")
     .eq("company_id", companyId);
   if (currentPagesError) throw new Error(currentPagesError.message);
 
-  const currentPageByCode = new Map((currentPages ?? []).map((page: PageRow) => [page.code, page]));
+  type CurrentPage = PageRow & { name?: string | null; sort_order?: number | null };
+  const currentPageByCode = new Map(
+    ((currentPages ?? []) as CurrentPage[]).map((page) => [page.code, page])
+  );
+
+  const toInsert: Array<(typeof accessPages)[number] & { company_id: string; is_active: boolean; updated_at: string }> = [];
+  const toUpdate: Array<{ id: string; code: string; name: string; sort_order: number }> = [];
 
   for (const page of accessPages) {
     const existing = currentPageByCode.get(page.code);
-    if (existing) {
-      const { error } = await supabase
-        .from("app_pages")
-        .update({ ...page, is_active: true, updated_at: now })
-        .eq("company_id", companyId)
-        .eq("id", existing.id);
-      if (error) throw new Error(error.message);
-    } else {
-      const { data, error } = await supabase
-        .from("app_pages")
-        .insert({ company_id: companyId, ...page, is_active: true, updated_at: now })
-        .select("id, code, is_active")
-        .single();
-      if (error) {
-        if (!isDuplicatePageCodeError(error)) throw new Error(error.message);
-
-        const { data: legacyPage, error: legacyError } = await supabase
-          .from("app_pages")
-          .select("id, code, is_active")
-          .eq("code", page.code)
-          .is("company_id", null)
-          .maybeSingle();
-        if (legacyError || !legacyPage) throw new Error(legacyError?.message ?? error.message);
-        currentPageByCode.set(page.code, legacyPage);
-      } else {
-        currentPageByCode.set(page.code, data);
-      }
+    if (!existing) {
+      toInsert.push({ company_id: companyId, ...page, is_active: true, updated_at: now });
+      continue;
+    }
+    const needsUpdate =
+      existing.is_active === false ||
+      existing.name !== page.name ||
+      existing.sort_order !== page.sort_order;
+    if (needsUpdate) {
+      toUpdate.push({ id: existing.id, code: page.code, name: page.name, sort_order: page.sort_order });
     }
   }
 
-  await mergeRetiredPagePermissions(supabase, companyId, "onboarding", "delivery_associates");
-  await copyLegacyGroupPermissions(supabase, companyId, "settings", [
-    "master_locations",
-    "master_providers",
-    "master_models",
-    "payment_methods",
-    "master_payment_banks",
-    "master_payment_heads",
-    "designations",
-    "biometric_devices"
-  ], true);
-  await copyLegacyGroupPermissions(supabase, companyId, "fleet", [
-    "fleet_action_center",
-    "fleet_vehicle_view",
-    "fleet_date_view",
-    "fleet_station_view",
-    "fleet_tracking",
-    "fleet_fuel_log",
-    "fleet_live_gps",
-    "fleet_maintenance",
-    "fleet_reports"
-  ], false);
+  if (toInsert.length) {
+    const { data, error } = await supabase
+      .from("app_pages")
+      .insert(toInsert)
+      .select("id, code, is_active");
+    if (error) {
+      if (!isDuplicatePageCodeError(error)) throw new Error(error.message);
+      // Rare race / legacy unique(code): fall back to per-row insert for missing only.
+      for (const page of toInsert) {
+        if (currentPageByCode.has(page.code)) continue;
+        const { data: row, error: rowError } = await supabase
+          .from("app_pages")
+          .insert(page)
+          .select("id, code, is_active")
+          .single();
+        if (rowError) {
+          if (!isDuplicatePageCodeError(rowError)) throw new Error(rowError.message);
+          const { data: legacyPage, error: legacyError } = await supabase
+            .from("app_pages")
+            .select("id, code, is_active")
+            .eq("code", page.code)
+            .is("company_id", null)
+            .maybeSingle();
+          if (legacyError || !legacyPage) throw new Error(legacyError?.message ?? rowError.message);
+          currentPageByCode.set(page.code, legacyPage);
+        } else if (row) {
+          currentPageByCode.set(row.code, row);
+        }
+      }
+    } else {
+      (data ?? []).forEach((page: PageRow) => currentPageByCode.set(page.code, page));
+    }
+  }
+
+  // Batch updates in chunks instead of one round-trip per page.
+  for (let i = 0; i < toUpdate.length; i += 20) {
+    const chunk = toUpdate.slice(i, i + 20);
+    await Promise.all(
+      chunk.map(async (page) => {
+        const { error } = await supabase
+          .from("app_pages")
+          .update({
+            name: page.name,
+            sort_order: page.sort_order,
+            is_active: true,
+            updated_at: now
+          })
+          .eq("company_id", companyId)
+          .eq("id", page.id);
+        if (error) throw new Error(error.message);
+        const current = currentPageByCode.get(page.code);
+        if (current) current.is_active = true;
+      })
+    );
+  }
+
+  if (toInsert.length || toUpdate.length) {
+    // Migrations only needed when catalog changed; skip the expensive legacy copies on hot paths.
+    await mergeRetiredPagePermissions(supabase, companyId, "onboarding", "delivery_associates");
+    await copyLegacyGroupPermissions(supabase, companyId, "settings", [
+      "master_locations",
+      "master_providers",
+      "master_models",
+      "payment_methods",
+      "master_payment_banks",
+      "master_payment_heads",
+      "designations",
+      "biometric_devices"
+    ], true);
+    await copyLegacyGroupPermissions(supabase, companyId, "fleet", [
+      "fleet_action_center",
+      "fleet_vehicle_view",
+      "fleet_date_view",
+      "fleet_station_view",
+      "fleet_tracking",
+      "fleet_fuel_log",
+      "fleet_live_gps",
+      "fleet_maintenance",
+      "fleet_reports"
+    ], false);
+  }
 
   const activePages = Array.from(currentPageByCode.values()).filter((page) => page.is_active !== false);
   const ownerRole = await getFirstRoleByCode(supabase, companyId, "OWNER");
@@ -384,12 +443,5 @@ export async function ensureAccessPages(supabase: SupabaseClient, companyId: str
     if (createLocationRoleError && !isDuplicateRoleCodeError(createLocationRoleError)) {
       throw new Error(createLocationRoleError.message);
     }
-  } else {
-    const { error: retireError } = await supabase
-      .from("user_roles")
-      .update({ parent_role_id: null, location_access_mode: "role_based", is_active: true })
-      .eq("company_id", companyId)
-      .eq("id", locationRole.id);
-    if (retireError) throw new Error(retireError.message);
   }
 }

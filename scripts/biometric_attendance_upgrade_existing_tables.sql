@@ -132,7 +132,12 @@ alter table public.biometric_enrolments
   add column if not exists effective_to date,
   add column if not exists notes text,
   add column if not exists created_by uuid,
+  add column if not exists full_name text,
   add column if not exists updated_at timestamptz not null default now();
+
+update public.biometric_enrolments
+set full_name = coalesce(nullif(btrim(full_name), ''), enrolment_id, 'Enrolment')
+where full_name is null;
 
 update public.biometric_enrolments
 set company_id = (select id from public.companies limit 1)
@@ -154,6 +159,7 @@ insert into public.biometric_enrolments (
   worker_type,
   employee_id,
   location_id,
+  full_name,
   status,
   effective_from,
   created_at,
@@ -165,6 +171,7 @@ select
   'employee',
   employees.id,
   employees.location_id,
+  coalesce(nullif(btrim(employees.full_name), ''), btrim(employees.biometric_id), 'Employee'),
   case when coalesce(employees.is_active, true) then 'Active' else 'Inactive' end,
   coalesce(employees.date_of_join, current_date),
   now(),
@@ -180,6 +187,7 @@ insert into public.biometric_enrolments (
   worker_type,
   field_executive_id,
   location_id,
+  full_name,
   status,
   effective_from,
   created_at,
@@ -191,6 +199,7 @@ select
   'individual_contract',
   field_executives.id,
   field_executives.location_id,
+  coalesce(nullif(btrim(field_executives.full_name), ''), btrim(field_executives.biometric_id), 'Field Executive'),
   case when coalesce(field_executives.is_active, true) then 'Active' else 'Inactive' end,
   coalesce(field_executives.date_of_join, current_date),
   now(),

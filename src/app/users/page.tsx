@@ -226,14 +226,28 @@ async function loadAccessData(
     };
   }
 
+  // Seed only when catalog gaps exist; previously this rewrote ~80 pages every request (~30s+).
   await ensureAccessPages(supabaseAdmin, companyId);
 
-  let pagesResult = await supabaseAdmin
-    .from("app_pages")
-    .select("id, code, name, sort_order, is_active")
-    .eq("company_id", companyId)
-    .eq("is_active", true)
-    .order("sort_order");
+  const [pagesResultInitial, rolesResultInitial, permissionsResultInitial] = await Promise.all([
+    supabaseAdmin
+      .from("app_pages")
+      .select("id, code, name, sort_order, is_active")
+      .eq("company_id", companyId)
+      .eq("is_active", true)
+      .order("sort_order"),
+    supabaseAdmin
+      .from("user_roles")
+      .select("id, code, name, location_access_mode, parent_role_id, is_system, is_active")
+      .eq("company_id", companyId)
+      .order("code"),
+    supabaseAdmin
+      .from("role_page_permissions")
+      .select("role_id, page_id, can_view, can_add, can_edit")
+      .eq("company_id", companyId)
+  ]);
+
+  let pagesResult = pagesResultInitial;
   if (isMissingCompanyColumn(pagesResult.error)) {
     pagesResult = await supabaseAdmin
       .from("app_pages")
@@ -251,11 +265,7 @@ async function loadAccessData(
       .order("sort_order");
   }
 
-  let rolesResult = await supabaseAdmin
-    .from("user_roles")
-    .select("id, code, name, location_access_mode, parent_role_id, is_system, is_active")
-    .eq("company_id", companyId)
-    .order("code");
+  let rolesResult = rolesResultInitial;
   if (isMissingCompanyColumn(rolesResult.error)) {
     rolesResult = await supabaseAdmin
       .from("user_roles")
@@ -270,10 +280,7 @@ async function loadAccessData(
       .order("code");
   }
 
-  let permissionsResult = await supabaseAdmin
-    .from("role_page_permissions")
-    .select("role_id, page_id, can_view, can_add, can_edit")
-    .eq("company_id", companyId);
+  let permissionsResult = permissionsResultInitial;
   if (isMissingCompanyColumn(permissionsResult.error)) {
     permissionsResult = await supabaseAdmin
       .from("role_page_permissions")

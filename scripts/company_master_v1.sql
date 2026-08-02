@@ -31,6 +31,18 @@ create unique index if not exists companies_webhook_key_idx
   on public.companies (webhook_key)
   where webhook_key is not null;
 
+-- Keep a single master company before enforcing uniqueness (personal DBs may already have duplicates).
+with ranked as (
+  select id, row_number() over (order by created_at nulls last, id) as rn
+  from public.companies
+  where is_master = true
+)
+update public.companies c
+set is_master = false
+from ranked
+where c.id = ranked.id
+  and ranked.rn > 1;
+
 create unique index if not exists companies_single_master_idx
   on public.companies ((is_master))
   where is_master = true;

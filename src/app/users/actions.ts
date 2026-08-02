@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { accessPages, ensureAccessPages } from "@/lib/access-pages";
+import { accessPages } from "@/lib/access-pages";
 import { currentAccessSurface, pageBelongsToSurface } from "@/lib/access-surface";
 import { isCompanyOwner, requirePagePermission, type AuthorizationContext } from "@/lib/authorization";
 import { requireCompanyId, withCompany } from "@/lib/company-scope";
@@ -306,7 +306,7 @@ export async function createUserRole(formData: FormData) {
     const parentRoleId = required(formData.get("parent_role_id"), "Reporting role");
     const mode = locationAccessMode(required(formData.get("location_access_mode"), "Location access"));
 
-    await ensureAccessPages(supabaseAdmin, companyId);
+    // Pages are already ensured on the Users page load; avoid another full catalog pass here.
     const surface = currentAccessSurface();
 
     const { data: role, error: roleError } = await supabaseAdmin

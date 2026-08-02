@@ -535,7 +535,7 @@ export async function loadCodStationSettings(companyId: string, locationScopeIds
 }
 
 export function codSetupMessage(error?: string | null) {
-  return `${error ? `${error} ` : ""}Run scripts/cod_station_settings_portal_columns_patch_v1.sql, scripts/ops_pulse_cod_portal_checks_v1.sql, and scripts/cod_driver_reconciliation_roster_v1.sql in Supabase SQL Editor, then refresh this page.`;
+  return `${error ? `${error} ` : ""}In personal Supabase SQL Editor, run in order: scripts/ops_pulse_cod_station_master_ai_v1.sql, scripts/cod_station_settings_portal_columns_patch_v1.sql, scripts/ops_pulse_cod_portal_checks_v1.sql, scripts/cod_driver_reconciliation_roster_v1.sql, scripts/dev_mode_cod_executive_reconciliation_v1.sql, scripts/cod_executive_reconciliation_denominations_v2.sql. For stations↔providers errors, add FKs on stations.provider_id → providers(id) and stations.location_model_id → location_models(id), then refresh.`;
 }
 
 export async function loadPortalCheckRuns(
