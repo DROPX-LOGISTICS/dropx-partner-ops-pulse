@@ -86,7 +86,8 @@ function currentHref(searchParams?: SearchParams) {
   if (searchParams?.status) query.set("status", searchParams.status);
   if (searchParams?.step) query.set("step", searchParams.step);
   const suffix = query.toString();
-  return `/ops-pulse/cod/executive-reconciliation${suffix ? `?${suffix}` : ""}`;
+  // Public ops host uses /cod/* (middleware rewrites to /ops-pulse/cod/*).
+  return `/cod/executive-reconciliation${suffix ? `?${suffix}` : ""}`;
 }
 
 function moneyClass(value: number) {
@@ -400,12 +401,17 @@ export default async function ExecutiveReconciliationPage({ searchParams }: { se
                       <input type="hidden" name="return_href" value={stepHref(1)} />
                       <input type="hidden" name="business_date" value={result.businessDate} />
                       <input type="hidden" name="location_id" value={defaultLocationId} />
-                      <SubmitButton className="button secondary" disabled={!permission.canEdit || Boolean(selectedClosure?.is_final_submitted)}>
+                      <SubmitButton className="button secondary" disabled={!permission.canEdit || Boolean(selectedClosure?.is_final_submitted) || !workerReady}>
                         {rows.length ? "Refresh drivers" : "Load drivers"}
                       </SubmitButton>
                     </form>
                   ) : null}
                 </div>
+                {!workerReady ? (
+                  <p className="subtle" style={{ marginTop: 12 }}>
+                    Automatic driver sync needs <code>OPS_PORTAL_WORKER_URL</code> and <code>OPS_PORTAL_WORKER_SECRET</code> in <code>.env.local</code>.
+                  </p>
+                ) : null}
               </div>
             </section>
           ) : null}
@@ -659,87 +665,77 @@ export default async function ExecutiveReconciliationPage({ searchParams }: { se
               </div>
               <span className="count-badge">{savedRows.length} entries</span>
             </div>
-            <div className="table-wrap reconciliation-saved-wrap" aria-label="Executive reconciliation sheet">
-              <table className="reconciliation-saved-table">
-                <thead>
-                  <tr>
-                    <th>Associate</th>
-                    <th>Executive ID</th>
-                    <th>Expected COD</th>
-                    <th>Cash count</th>
-                    <th>Collected</th>
-                    <th>Difference</th>
-                    <th>Status</th>
-                    <th>Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {savedRows.length ? savedRows.map((row) => {
-                    const difference = amountValue(row.difference_amount);
-                    return (
-                      <tr key={row.key}>
-                        <td>
+            <div className="reconciliation-entry-list reconciliation-saved-list" aria-label="Executive reconciliation sheet">
+              {savedRows.length ? savedRows.map((row) => {
+                const difference = amountValue(row.difference_amount);
+                return (
+                  <article className="reconciliation-entry-card" key={row.key}>
+                    <form action={saveExecutiveReconciliation}>
+                      <div className="reconciliation-entry-grid reconciliation-saved-grid">
+                        <div>
+                          <span className="reconciliation-field-label">Associate</span>
                           {row.source_associate_name ? (
                             <PendingReconDetails row={row} />
                           ) : (
-                            <input className="field compact-field associate-field" form={`recon-${row.key}`} name="manual_associate_name" defaultValue={row.manual_associate_name ?? ""} placeholder="Associate name" required />
+                            <input className="field" name="manual_associate_name" defaultValue={row.manual_associate_name ?? ""} placeholder="Associate name" required />
                           )}
-                          <br /><span className="subtle">{row.shipment_type ?? "SCC Driver Reconciliation"}</span>
-                        </td>
-                        <td>{row.provider_employee_id}</td>
-                        <td><input className="field compact-field amount-field" form={`recon-${row.key}`} name="expected_amount" defaultValue={String(row.expected_amount ?? 0)} inputMode="decimal" /></td>
-                        <td>
-                          <details className="cash-breakdown inline">
-                            <summary>Edit denominations</summary>
-                            <div className="cash-breakdown-grid">
-                              {denominations.map(([name, label]) => (
-                                <label key={`${row.key}-${name}`}>₹{label}
-                                  <input className="field compact-field cash-count-field" form={`recon-${row.key}`} name={name} defaultValue={String(denominationValue(row, name))} inputMode="numeric" />
-                                </label>
-                              ))}
-                              <label>Other
-                                <input className="field compact-field cash-count-field" form={`recon-${row.key}`} name="cash_other_amount" defaultValue={String(row.cash_other_amount ?? 0)} inputMode="decimal" />
-                              </label>
-                              <label className="cash-remarks">Remarks
-                                <input className="field compact-field" form={`recon-${row.key}`} name="remarks" defaultValue={row.remarks ?? ""} placeholder="Optional note" />
-                              </label>
-                            </div>
-                          </details>
-                        </td>
-                        <td><strong>{formatAmount(row.collected_amount)}</strong></td>
-                        <td><strong className={moneyClass(difference)}>{differenceLabel(difference)}</strong></td>
-                        <td><StatusPill status={row.reconciliation_status} /></td>
-                        <td>
-                          <form action={saveExecutiveReconciliation} id={`recon-${row.key}`}>
-                            <input type="hidden" name="return_href" value={returnHref} />
-                            <input type="hidden" name="business_date" value={row.business_date} />
-                            <input type="hidden" name="location_id" value={row.location_id ?? ""} />
-                            <input type="hidden" name="station_code" value={row.station_code} />
-                            <input type="hidden" name="provider_employee_id" value={row.provider_employee_id} />
-                            <input type="hidden" name="source_associate_name" value={row.source_associate_name ?? ""} />
-                            <input type="hidden" name="shipment_type" value={row.shipment_type ?? ""} />
-                            <input type="hidden" name="total_delivery" value={String(row.total_delivery ?? 0)} />
-                            <input type="hidden" name="total_activity" value={String(row.total_activity ?? 0)} />
-                            <div className="form-actions" style={{ flexWrap: "nowrap" }}>
-                              <SubmitButton className="button secondary small-button" disabled={!permission.canEdit || selectedClosure?.is_final_submitted}>Update</SubmitButton>
-                              <button
-                                className="button ghost small-button"
-                                formAction={deleteExecutiveReconciliation}
-                                disabled={!permission.canEdit || selectedClosure?.is_final_submitted}
-                                type="submit"
-                              >
-                                Delete
-                              </button>
-                            </div>
-                          </form>
-                        </td>
-                      </tr>
-                    );
-                  }) : (
-                    <tr><td className="empty-cell" colSpan={8}>No saved cash entries.</td></tr>
-                  )}
-                </tbody>
-              </table>
+                          <span className="subtle">{row.provider_employee_id} · {row.shipment_type ?? "SCC Driver Reconciliation"}</span>
+                        </div>
+                        <label>Expected COD
+                          <input className="field" name="expected_amount" defaultValue={String(row.expected_amount ?? 0)} inputMode="decimal" />
+                        </label>
+                        <label>Remarks
+                          <input className="field" name="remarks" defaultValue={row.remarks ?? ""} placeholder="Optional note" />
+                        </label>
+                        <div className="reconciliation-row-actions">
+                          <input type="hidden" name="return_href" value={returnHref} />
+                          <input type="hidden" name="business_date" value={row.business_date} />
+                          <input type="hidden" name="location_id" value={row.location_id ?? ""} />
+                          <input type="hidden" name="station_code" value={row.station_code} />
+                          <input type="hidden" name="provider_employee_id" value={row.provider_employee_id} />
+                          <input type="hidden" name="source_associate_name" value={row.source_associate_name ?? ""} />
+                          <input type="hidden" name="shipment_type" value={row.shipment_type ?? ""} />
+                          <input type="hidden" name="total_delivery" value={String(row.total_delivery ?? 0)} />
+                          <input type="hidden" name="total_activity" value={String(row.total_activity ?? 0)} />
+                          <SubmitButton className="button secondary" disabled={!permission.canEdit || selectedClosure?.is_final_submitted}>Update</SubmitButton>
+                          <button
+                            className="button ghost"
+                            formAction={deleteExecutiveReconciliation}
+                            disabled={!permission.canEdit || selectedClosure?.is_final_submitted}
+                            type="submit"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+                      <details className="cash-breakdown">
+                        <summary>Cash denomination count</summary>
+                        <div className="cash-breakdown-grid">
+                          {denominations.map(([name, label]) => (
+                            <label key={`${row.key}-${name}`}>₹{label}
+                              <input className="field" name={name} defaultValue={String(denominationValue(row, name))} inputMode="numeric" />
+                            </label>
+                          ))}
+                          <label>Other / coins
+                            <input className="field" name="cash_other_amount" defaultValue={String(row.cash_other_amount ?? 0)} inputMode="decimal" />
+                          </label>
+                        </div>
+                      </details>
+                      <div className={`cash-live-status ${difference < -0.005 ? "short" : difference > 0.005 ? "excess" : "matched"}`}>
+                        <span>Collected <strong>{formatAmount(row.collected_amount)}</strong></span>
+                        <span>Expected <strong>{formatAmount(row.expected_amount)}</strong></span>
+                        <span className="cash-live-result">
+                          <StatusPill status={row.reconciliation_status} />
+                          {" "}
+                          <strong>{differenceLabel(difference)}</strong>
+                        </span>
+                      </div>
+                    </form>
+                  </article>
+                );
+              }) : (
+                <div className="panel-body"><p className="subtle">No saved cash entries.</p></div>
+              )}
             </div>
             {savedRows.length ? <div className="reconciliation-stage-footer"><span>Review differences before submitting COD.</span><a className="button" href={stepHref(2)}>Continue to driver validation →</a></div> : null}
           </section>

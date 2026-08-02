@@ -10572,15 +10572,22 @@ tbody tr:hover td {
   background: #f8fafc;
 }
 
-.cash-breakdown.inline {
-  margin: 0;
+.reconciliation-saved-list {
+  border-top: 1px solid #e2e8f0;
 }
 
-.cash-breakdown.inline .cash-breakdown-grid {
-  position: absolute;
-  z-index: 20;
-  width: min(720px, calc(100vw - 360px));
-  box-shadow: 0 12px 32px rgba(15, 23, 42, .14);
+.reconciliation-field-label {
+  display: block;
+  margin-bottom: 5px;
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.reconciliation-saved-grid > div .subtle {
+  display: block;
+  margin-top: 6px;
 }
 
 .cash-breakdown-grid .cash-remarks {
@@ -10635,7 +10642,7 @@ tbody tr:hover td {
   justify-content: flex-start;
 }
 
-.reconciliation-saved-wrap {
+.table-wrap.reconciliation-saved-wrap {
   overflow: visible;
 }
 

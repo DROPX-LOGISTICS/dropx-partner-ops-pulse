@@ -15,12 +15,14 @@ import { finalizeCodClosure, notifyCodManager } from "@/lib/ops-pulse/cod-day-cl
 import { canAccessCodAudit, writeCodAudit } from "@/lib/ops-pulse/cod-audit";
 
 const pagePath = "/ops-pulse/cod/executive-reconciliation";
+const publicPagePath = "/cod/executive-reconciliation";
 
-function redirectWithFlash(params: { error?: string; notice?: string }, href = pagePath): never {
+function redirectWithFlash(params: { error?: string; notice?: string }, href = publicPagePath): never {
+  // path "/" so flash works on both /cod/* (ops host) and /ops-pulse/cod/* URLs
   cookies().set("dropx_cod_executive_reconciliation_flash", JSON.stringify(params), {
     httpOnly: true,
     maxAge: 25,
-    path: pagePath,
+    path: "/",
     sameSite: "lax"
   });
   redirect(href);
@@ -28,9 +30,9 @@ function redirectWithFlash(params: { error?: string; notice?: string }, href = p
 
 function safeReturnHref(value: FormDataEntryValue | null) {
   const href = clean(value);
-  if (!href) return pagePath;
-  if (!href.startsWith(pagePath)) return pagePath;
-  return href;
+  if (!href) return publicPagePath;
+  if (href.startsWith(publicPagePath) || href.startsWith(pagePath)) return href;
+  return publicPagePath;
 }
 
 function appBaseUrl() {
@@ -83,108 +85,6 @@ function manualExecutiveId(stationCode: string, businessDate: string, associateN
     .replace(/^-+|-+$/g, "")
     .slice(0, 36);
   return `MANUAL-${stationCode}-${businessDate}-${slug || "ASSOCIATE"}`;
-}
-
-function sccImportedExecutiveId(stationCode: string, businessDate: string, associateName: string) {
-  const slug = associateName
-    .trim()
-    .toUpperCase()
-    .replace(/[^A-Z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 44);
-  return `SCC-${stationCode}-${businessDate}-${slug || "ASSOCIATE"}`;
-}
-
-function normalizeAssociateName(name: string) {
-  return name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
-}
-
-function parseSccAmount(value: string) {
-  const cleaned = String(value ?? "")
-    .replace(/₹/g, "")
-    .replace(/,/g, "")
-    .replace(/[^\d.-]/g, "")
-    .trim();
-  const parsed = Number(cleaned);
-  return Number.isFinite(parsed) ? Number(parsed.toFixed(2)) : 0;
-}
-
-function splitSccLine(line: string) {
-  const tabbed = line.split("\t").map((cell) => cell.trim()).filter(Boolean);
-  if (tabbed.length > 1) return tabbed;
-  return line.split(/\s{2,}/).map((cell) => cell.trim()).filter(Boolean);
-}
-
-function looksLikeHeaderOrNoise(cells: string[]) {
-  const joined = cells.join(" ").toLowerCase();
-  if (!joined) return true;
-  return joined === "driver" ||
-    joined.includes("please configure") ||
-    joined.includes("select driver") ||
-    joined.includes("daily payment") ||
-    joined.includes("overall payment") ||
-    joined.includes("pending recon") ||
-    joined.includes("running balance") ||
-    joined.includes("undebriefed");
-}
-
-function parseSccRosterPaste(text: string, stationCode: string, businessDate: string) {
-  const headers = [
-    "Name",
-    "ID",
-    "Provider",
-    "Type",
-    "Expected",
-    "Undebriefed MPOS",
-    "Undebriefed CASH",
-    "Variance",
-    "Running Balance",
-    "Pending Recon"
-  ];
-  const seen = new Set<string>();
-  const rows: Array<{
-    associateName: string;
-    providerEmployeeId: string;
-    pendingAmount: number;
-    reconciliationState: string;
-    cells: string[];
-    headers: string[];
-  }> = [];
-
-  text
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .forEach((line) => {
-      const cells = splitSccLine(line);
-      if (cells.length < 2 || looksLikeHeaderOrNoise(cells)) return;
-
-      const associateName = cells[0]?.trim();
-      if (!associateName || /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(associateName)) return;
-
-      const possibleId = cells[1]?.trim() ?? "";
-      const providerEmployeeId = /^[A-Z0-9_-]{4,}$/i.test(possibleId)
-        ? possibleId
-        : sccImportedExecutiveId(stationCode, businessDate, associateName);
-      const pendingAmount = parseSccAmount(cells[cells.length - 1] ?? "0");
-      const key = providerEmployeeId.trim().toUpperCase();
-      if (seen.has(key)) return;
-      seen.add(key);
-
-      rows.push({
-        associateName,
-        providerEmployeeId,
-        pendingAmount,
-        reconciliationState: cells[3] || "SCC Driver Reconciliation",
-        cells,
-        headers
-      });
-    });
-
-  return rows;
 }
 
 function reconciliationStatus(expectedAmount: number, collectedAmount: number) {
@@ -325,11 +225,27 @@ async function savePayload(
     .maybeSingle();
   if (existing.error) throw new Error(existing.error.message);
 
-  const { data: saved, error } = await supabaseAdmin
-    .from("cod_executive_reconciliations")
-    .upsert(payload, { onConflict: "company_id,business_date,station_code,provider_employee_id" })
-    .select("*")
-    .single();
+  // Avoid PostgREST ON CONFLICT: personal DBs may lack the unique index, and
+  // id/created_at defaults may be missing after incomplete schema setup.
+  const now = new Date().toISOString();
+  const saveResult = existing.data
+    ? await supabaseAdmin
+      .from("cod_executive_reconciliations")
+      .update({ ...payload, updated_at: now })
+      .eq("id", existing.data.id)
+      .select("*")
+      .single()
+    : await supabaseAdmin
+      .from("cod_executive_reconciliations")
+      .insert({
+        ...payload,
+        id: crypto.randomUUID(),
+        created_at: now,
+        updated_at: now
+      })
+      .select("*")
+      .single();
+  const { data: saved, error } = saveResult;
   if (error) throw new Error(error.message);
   await writeCodAudit({
     action: existing.data ? "Executive updated" : "Executive created",
@@ -346,6 +262,7 @@ async function savePayload(
   await markCashSubmissionStale(companyId, businessDate, station.id);
 
   revalidatePath(pagePath);
+  revalidatePath(publicPagePath);
   redirectWithFlash({ notice: successMessage }, returnHref);
 }
 
@@ -600,67 +517,6 @@ export async function submitCodCashCollection(formData: FormData) {
   }
 }
 
-export async function pasteSccDriverReconciliationRoster(formData: FormData) {
-  const authorization = await requirePagePermission("cod_executive_reconciliation", "add");
-  const companyId = requireCompanyId(authorization);
-
-  try {
-    if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
-    const returnHref = safeReturnHref(formData.get("return_href"));
-    const businessDate = required(formData.get("business_date"), "Business date");
-    const locationId = clean(formData.get("location_id"));
-    const pastedRoster = required(formData.get("pasted_roster"), "SCC table rows");
-    if (!locationId) throw new Error("Select one station before importing SCC rows.");
-
-    const station = await stationForInput(companyId, locationId, null);
-    assertLocationAccess(authorization, station.id);
-
-    const rows = parseSccRosterPaste(pastedRoster, station.station_code, businessDate);
-    if (!rows.length) {
-      throw new Error("Could not read associate rows. Copy the visible Driver Reconciliation table rows from SCC and paste again.");
-    }
-
-    const now = new Date().toISOString();
-    const payload = rows.map((row) => withCompany({
-      location_id: station.id,
-      station_code: station.station_code,
-      portal_station_code: station.station_code,
-      business_date: businessDate,
-      provider_employee_id: row.providerEmployeeId,
-      associate_name: row.associateName,
-      normalized_associate_name: normalizeAssociateName(row.associateName),
-      route_code: null,
-      reconciliation_state: row.reconciliationState,
-      pending_amount: row.pendingAmount,
-      pending_details: [],
-      last_detail_checked_at: null,
-      raw_row: {
-        cells: row.cells,
-        headers: row.headers,
-        imported_at: now,
-        source: "scc_paste"
-      },
-      source: "scc_driver_reconciliation",
-      first_seen_at: now,
-      last_seen_at: now
-    }, companyId));
-
-    const { error } = await supabaseAdmin
-      .from("cod_driver_reconciliation_roster")
-      .upsert(payload, { onConflict: "company_id,business_date,station_code,provider_employee_id" });
-    if (error) throw new Error(error.message);
-
-    revalidatePath(pagePath);
-    redirectWithFlash(
-      { notice: `${payload.length} SCC associate${payload.length === 1 ? "" : "s"} imported. Count cash against each row now.` },
-      returnHref
-    );
-  } catch (error) {
-    if (isNextRedirectError(error)) throw error;
-    redirectWithFlash({ error: (error as Error).message }, safeReturnHref(formData.get("return_href")));
-  }
-}
-
 export async function refreshExecutiveReconciliationRoster(formData: FormData) {
   const authorization = await requirePagePermission("cod_executive_reconciliation", "edit");
   const companyId = requireCompanyId(authorization);
@@ -697,7 +553,9 @@ export async function refreshExecutiveReconciliationRoster(formData: FormData) {
     const workerUrl = process.env.OPS_PORTAL_WORKER_URL?.trim();
     const workerSecret = process.env.OPS_PORTAL_WORKER_SECRET?.trim();
     if (!workerUrl || !workerSecret) {
-      throw new Error("Automatic SCC sync worker is not connected on this deployment yet. Configure OPS_PORTAL_WORKER_URL and OPS_PORTAL_WORKER_SECRET for the SCC worker. This is separate from the biometric middleware.");
+      throw new Error(
+        "Automatic SCC sync is not configured. Set OPS_PORTAL_WORKER_URL and OPS_PORTAL_WORKER_SECRET in .env.local."
+      );
     }
 
     const payload = withCompany({

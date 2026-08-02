@@ -680,7 +680,7 @@ export async function loadExecutiveReconciliationRows(
 
   let reconciliationQuery = supabaseAdmin
     .from("cod_executive_reconciliations")
-    .select("id, business_date, location_id, station_code, provider_employee_id, source_associate_name, manual_associate_name, shipment_type, total_delivery, total_activity, reconciliation_status, pending_amount, expected_amount, cash_500_count, cash_200_count, cash_100_count, cash_50_count, cash_20_count, cash_10_count, cash_other_amount, collected_amount, difference_amount, remarks, created_at, updated_at, stations (id, station_code, station_name, state)")
+    .select("id, business_date, location_id, station_code, provider_employee_id, source_associate_name, manual_associate_name, shipment_type, total_delivery, total_activity, reconciliation_status, pending_amount, expected_amount, cash_500_count, cash_200_count, cash_100_count, cash_50_count, cash_20_count, cash_10_count, cash_other_amount, collected_amount, difference_amount, remarks, created_at, updated_at")
     .eq("company_id", companyId)
     .eq("business_date", businessDate);
   if (params.locationId) reconciliationQuery = reconciliationQuery.eq("location_id", params.locationId);
@@ -862,7 +862,7 @@ export async function loadExecutiveReconciliationRows(
   reconciliations.forEach((reconciliation) => {
     const key = executiveRowKey(reconciliation.station_code, reconciliation.provider_employee_id);
     if (rowsByKey.has(key)) return;
-    const station = firstRelation(reconciliation.stations) ?? locationsByStation.get(String(reconciliation.station_code).trim().toUpperCase()) ?? null;
+    const station = locationsByStation.get(String(reconciliation.station_code).trim().toUpperCase()) ?? null;
     rowsByKey.set(key, {
       key,
       reconciliation_id: reconciliation.id,
