@@ -1,12 +1,6 @@
-import path from "path";
-import { fileURLToPath } from "url";
-
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  outputFileTracingRoot: path.join(path.dirname(fileURLToPath(import.meta.url)))
+  // Keep build self-contained on hosts like Render (avoid picking up parent lockfiles).
 };
 
 export default nextConfig;
-
-import { initOpenNextCloudflareForDev } from "@opennextjs/cloudflare";
-initOpenNextCloudflareForDev();

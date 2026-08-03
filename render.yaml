@@ -1,0 +1,36 @@
+services:
+  - type: web
+    name: dropx-partner-ops-pulse
+    runtime: node
+    plan: free
+    region: singapore
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /login
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: NEXT_PUBLIC_SUPABASE_URL
+        sync: false
+      - key: NEXT_PUBLIC_SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: NEXT_PUBLIC_APP_URL
+        sync: false
+      - key: OPS_APP_URL
+        sync: false
+      - key: CASH_RECON_WORKER_URL
+        sync: false
+      - key: CASH_RECON_ADMIN_KEY
+        sync: false
+      - key: COMPANY_SUPABASE_URL
+        sync: false
+      - key: COMPANY_SUPABASE_SERVICE_KEY
+        sync: false
+      - key: CRON_SECRET
+        sync: false
+      - key: EMAIL_API_KEY
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
