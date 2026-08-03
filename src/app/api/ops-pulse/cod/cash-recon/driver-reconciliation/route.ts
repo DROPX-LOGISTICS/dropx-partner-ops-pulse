@@ -58,6 +58,7 @@ async function persistRosterRows(params: {
       raw_row: {
         source: "cash_recon_worker",
         expected: associate.expected,
+        expected_source: "expected_cash",
         pending_recon: associate.pendingRecon,
         associate_source: associate.source,
         employee_id: associate.employeeId

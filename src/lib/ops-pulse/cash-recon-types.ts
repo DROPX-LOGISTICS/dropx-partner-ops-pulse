@@ -30,6 +30,37 @@ export type CashReconDriver = {
   tasId: string;
 };
 
+export type ExpectedCashShipment = {
+  barcode?: string | null;
+  shipmentNo?: string | null;
+  employeeId?: number | string | null;
+  driverName?: string | null;
+  paymentMethod?: string | null;
+  shipmentStatus?: string | null;
+  shipmentType?: string | null;
+  updateDate?: string | null;
+  receivableAmount?: CashMoney | null;
+  receivedAmount?: CashMoney | null;
+  remittanceCode?: string | null;
+  reconciled?: boolean | null;
+};
+
+export type ExpectedCashByDriver = {
+  employeeId?: number | string | null;
+  driverName?: string | null;
+  tasId?: string | null;
+  totalReceived?: number | null;
+  shipmentCount?: number | null;
+  shipments?: ExpectedCashShipment[] | null;
+};
+
+export type ExpectedCashSummary = {
+  totalReceived?: number | null;
+  shipmentCount?: number | null;
+  byDriver?: ExpectedCashByDriver[] | null;
+  cashShipments?: ExpectedCashShipment[] | null;
+};
+
 export type CashReconRow = {
   store?: boolean;
   driverInfo?: { name?: string | null; id?: string | null } | null;
@@ -46,6 +77,7 @@ export type CashReconRow = {
       trackingId?: string | null;
       paymentMethod?: string | null;
       moneyCollectionTime?: number | null;
+      transactionTime?: number | null;
       amount?: CashMoney | null;
       stationTimeZone?: string | null;
     }> | null;
@@ -61,10 +93,12 @@ export type DriverReconciliationNormalized = {
   reconciliationCount: number;
   associates: CashReconAssociate[];
   missingFromDer: CashReconAssociate[];
-  /** Associates with paymentInfo.expected.value > 0 that must have saved cash before Step 2. */
+  /** Associates with cash-only expected (expectedCash.totalReceived) > 0 that must have saved cash before Step 2. */
   requiredForCashEntry: CashReconAssociate[];
-  /** Raw worker reconciliation rows — kept so the client can rebuild the Step-2 gate if needed. */
+  /** Raw worker reconciliation rows — kept for pending-recon / override UX. */
   reconciliation: CashReconRow[];
+  /** Cash-only expected totals from worker (preferred over paymentInfo.expected which includes MPOS). */
+  expectedCash: ExpectedCashSummary | null;
 };
 
 export type LiabilitySummaryNormalized = {
@@ -133,16 +167,59 @@ function mapBreakdown(list: CashReconRow["paymentInfo"]): CashReconPendingBreakd
   return rows.map((row) => ({
     trackingId: String(row?.trackingId ?? "").trim() || "-",
     paymentMethod: String(row?.paymentMethod ?? "").trim() || "-",
-    moneyCollectionTime: typeof row?.moneyCollectionTime === "number" ? row.moneyCollectionTime : null,
+    moneyCollectionTime: typeof row?.moneyCollectionTime === "number"
+      ? row.moneyCollectionTime
+      : typeof row?.transactionTime === "number"
+        ? row.transactionTime
+        : null,
     amount: moneyValue(row?.amount),
     stationTimeZone: String(row?.stationTimeZone ?? "").trim() || "IST"
   }));
 }
 
+/** Index cash-only expected by employeeId and tasId for O(1) lookup. */
+export function indexExpectedCashByDriver(expectedCash: ExpectedCashSummary | null | undefined) {
+  const byEmployeeId = new Map<string, ExpectedCashByDriver>();
+  const byTasId = new Map<string, ExpectedCashByDriver>();
+  const rows = Array.isArray(expectedCash?.byDriver) ? expectedCash.byDriver : [];
+  for (const row of rows) {
+    const employeeId = String(row.employeeId ?? "").trim().toUpperCase();
+    const tasId = String(row.tasId ?? "").trim().toUpperCase();
+    if (employeeId) byEmployeeId.set(employeeId, row);
+    if (tasId) byTasId.set(tasId, row);
+  }
+  return { byEmployeeId, byTasId };
+}
+
+/**
+ * Cash-only expected COD for a driver.
+ * Prefer expectedCash.byDriver.totalReceived; fall back to recon paymentInfo.expected only when expectedCash is absent.
+ */
+export function resolveCashExpected(params: {
+  employeeId?: string | number | null;
+  tasId?: string | null;
+  expectedCashIndex?: ReturnType<typeof indexExpectedCashByDriver> | null;
+  hasExpectedCashPayload?: boolean;
+  reconExpected?: CashMoney | number | string | null;
+}): number {
+  const employeeId = String(params.employeeId ?? "").trim().toUpperCase();
+  const tasId = String(params.tasId ?? "").trim().toUpperCase();
+  const index = params.expectedCashIndex;
+  const cashRow = (employeeId && index?.byEmployeeId.get(employeeId))
+    || (tasId && index?.byTasId.get(tasId))
+    || null;
+  if (cashRow) return moneyValue(cashRow.totalReceived);
+  // When worker sent expectedCash, missing driver ⇒ cash expected 0 (do not use MPOS-inclusive recon.expected).
+  if (params.hasExpectedCashPayload) return 0;
+  return moneyValue(params.reconExpected);
+}
+
 function fromRecon(
   row: CashReconRow,
   source: CashReconAssociate["source"],
-  drivers: CashReconDriver[] = []
+  drivers: CashReconDriver[] = [],
+  expectedCashIndex: ReturnType<typeof indexExpectedCashByDriver> | null = null,
+  hasExpectedCashPayload = false
 ): CashReconAssociate | null {
   const id = String(row.driverInfo?.id ?? "").trim();
   const shortName = String(row.driverInfo?.name ?? "").trim();
@@ -160,7 +237,13 @@ function fromRecon(
     name: name || id,
     displayName: name || id,
     employeeId,
-    expected: moneyValue(payment?.expected),
+    expected: resolveCashExpected({
+      employeeId,
+      tasId: id,
+      expectedCashIndex,
+      hasExpectedCashPayload,
+      reconExpected: payment?.expected
+    }),
     pendingRecon: moneyValue(payment?.overallPendingRecon),
     breakdown: mapBreakdown(payment),
     source,
@@ -230,7 +313,8 @@ function findReconForBaseline(
 export function buildCashReconAssociates(
   drivers: CashReconDriver[],
   reconciliation: CashReconRow[],
-  baselineAssociates: BaselineAssociate[] = []
+  baselineAssociates: BaselineAssociate[] = [],
+  expectedCash: ExpectedCashSummary | null = null
 ): Pick<DriverReconciliationNormalized, "associates" | "missingFromDer"> {
   const reconByTasId = new Map<string, CashReconRow>();
   const reconByName = new Map<string, CashReconRow>();
@@ -240,6 +324,18 @@ export function buildCashReconAssociates(
     if (id) reconByTasId.set(id, row);
     if (nameKey && !reconByName.has(nameKey)) reconByName.set(nameKey, row);
   });
+
+  const expectedCashIndex = indexExpectedCashByDriver(expectedCash);
+  const hasExpectedCashPayload = Array.isArray(expectedCash?.byDriver);
+
+  const cashExpectedFor = (employeeId: string | number | null | undefined, tasId: string | null | undefined, reconExpected?: CashMoney | null) =>
+    resolveCashExpected({
+      employeeId,
+      tasId,
+      expectedCashIndex,
+      hasExpectedCashPayload,
+      reconExpected
+    });
 
   const matchedDriverKeys = new Set<string>();
   const matchedReconIds = new Set<string>();
@@ -265,12 +361,14 @@ export function buildCashReconAssociates(
       if (reconName) matchedReconNames.add(reconName);
       const payment = recon?.paymentInfo;
       const fullName = String(driver?.driverName ?? "").trim() || row.name;
+      const employeeId = driver?.employeeId == null ? row.providerEmployeeId : String(driver.employeeId);
+      const tasId = driver?.tasId ?? recon?.driverInfo?.id ?? null;
       return {
         providerEmployeeId: row.providerEmployeeId,
         name: fullName,
         displayName: fullName,
         employeeId: driver?.employeeId == null ? null : String(driver.employeeId),
-        expected: moneyValue(payment?.expected),
+        expected: cashExpectedFor(employeeId, tasId, payment?.expected),
         pendingRecon: moneyValue(payment?.overallPendingRecon),
         breakdown: mapBreakdown(payment),
         source: recon || driver ? "matched" as const : "driver_only" as const,
@@ -293,7 +391,7 @@ export function buildCashReconAssociates(
         name: String(driver.driverName ?? "").trim() || driverDisplayName(driver.driverName),
         displayName: String(driver.driverName ?? "").trim() || driverDisplayName(driver.driverName),
         employeeId: driver.employeeId == null ? null : String(driver.employeeId),
-        expected: moneyValue(recon?.paymentInfo?.expected),
+        expected: cashExpectedFor(driver.employeeId, driver.tasId, recon?.paymentInfo?.expected),
         pendingRecon: moneyValue(recon?.paymentInfo?.overallPendingRecon),
         breakdown: mapBreakdown(recon?.paymentInfo),
         source: "extra",
@@ -304,7 +402,6 @@ export function buildCashReconAssociates(
     reconciliation.forEach((row) => {
       const id = String(row.driverInfo?.id ?? "").trim().toUpperCase();
       const nameKey = normalizeAssociateName(String(row.driverInfo?.name ?? ""));
-      const expected = moneyValue(row.paymentInfo?.expected);
       const pendingRecon = moneyValue(row.paymentInfo?.overallPendingRecon);
       const breakdown = mapBreakdown(row.paymentInfo);
 
@@ -316,10 +413,10 @@ export function buildCashReconAssociates(
       });
       if (associateIndex >= 0) {
         const current = associates[associateIndex];
-        if (expected > 0.01 || pendingRecon > 0.01 || (!current.breakdown.length && breakdown.length)) {
+        // Pending/breakdown from recon; do not overwrite cash-only expected with MPOS-inclusive recon.expected.
+        if (pendingRecon > 0.01 || (!current.breakdown.length && breakdown.length)) {
           associates[associateIndex] = {
             ...current,
-            expected: expected > 0.01 ? expected : current.expected,
             pendingRecon: pendingRecon > 0.01 ? pendingRecon : current.pendingRecon,
             breakdown: breakdown.length ? breakdown : current.breakdown,
             source: current.source === "driver_only" ? "matched" : current.source
@@ -333,7 +430,7 @@ export function buildCashReconAssociates(
       if (id && matchedReconIds.has(id)) return;
       if (nameKey && matchedReconNames.has(nameKey)) return;
       if (associates.some((associate) => associateNamesMatch(associate.name, String(row.driverInfo?.name ?? "")))) return;
-      const mapped = fromRecon(row, "extra", drivers);
+      const mapped = fromRecon(row, "extra", drivers, expectedCashIndex, hasExpectedCashPayload);
       if (mapped) missingFromDer.push(mapped);
     });
 
@@ -367,7 +464,7 @@ export function buildCashReconAssociates(
       name: fullName,
       displayName: fullName,
       employeeId: driver.employeeId == null ? null : String(driver.employeeId),
-      expected: moneyValue(payment?.expected),
+      expected: cashExpectedFor(driver.employeeId, tasId, payment?.expected),
       pendingRecon: moneyValue(payment?.overallPendingRecon),
       breakdown: mapBreakdown(payment),
       source: recon ? "matched" as const : "driver_only" as const,
@@ -378,8 +475,6 @@ export function buildCashReconAssociates(
   const missingFromDer: CashReconAssociate[] = [];
   reconciliation.forEach((row) => {
     const id = String(row.driverInfo?.id ?? "").trim().toUpperCase();
-    const nameKey = normalizeAssociateName(String(row.driverInfo?.name ?? ""));
-    const expected = moneyValue(row.paymentInfo?.expected);
     const pendingRecon = moneyValue(row.paymentInfo?.overallPendingRecon);
     const breakdown = mapBreakdown(row.paymentInfo);
 
@@ -391,10 +486,9 @@ export function buildCashReconAssociates(
     });
     if (associateIndex >= 0) {
       const current = associates[associateIndex];
-      if (expected > 0.01 || pendingRecon > 0.01 || (!current.breakdown.length && breakdown.length)) {
+      if (pendingRecon > 0.01 || (!current.breakdown.length && breakdown.length)) {
         associates[associateIndex] = {
           ...current,
-          expected: expected > 0.01 ? expected : current.expected,
           pendingRecon: pendingRecon > 0.01 ? pendingRecon : current.pendingRecon,
           breakdown: breakdown.length ? breakdown : current.breakdown,
           source: current.source === "driver_only" ? "matched" : current.source
@@ -405,7 +499,7 @@ export function buildCashReconAssociates(
     }
 
     if (id && matchedTasIds.has(id)) return;
-    const mapped = fromRecon(row, "extra", drivers);
+    const mapped = fromRecon(row, "extra", drivers, expectedCashIndex, hasExpectedCashPayload);
     if (mapped) missingFromDer.push(mapped);
   });
 
@@ -425,17 +519,20 @@ export function buildCashReconAssociates(
 }
 
 /**
- * Source of truth for Step-2 gate: every reconciliation row with expected > 0,
- * resolved onto Collect-cash / Missing-DER associates when IDs or names match.
+ * Step-2 gate: every driver with cash-only expected (expectedCash.totalReceived) > 0
+ * must have a saved cash entry. Pending recon still comes from reconciliation.
  */
 export function buildRequiredCashAssociates(
   reconciliation: CashReconRow[],
   associates: CashReconAssociate[],
   missingFromDer: CashReconAssociate[] = [],
-  drivers: CashReconDriver[] = []
+  drivers: CashReconDriver[] = [],
+  expectedCash: ExpectedCashSummary | null = null
 ): CashReconAssociate[] {
   const pool = [...associates, ...missingFromDer.filter((row) => row.source !== "other")];
   const byKey = new Map<string, CashReconAssociate>();
+  const expectedCashIndex = indexExpectedCashByDriver(expectedCash);
+  const hasExpectedCashPayload = Array.isArray(expectedCash?.byDriver);
 
   const upsert = (row: CashReconAssociate) => {
     const id = String(row.providerEmployeeId ?? "").trim();
@@ -453,6 +550,47 @@ export function buildRequiredCashAssociates(
     upsert(row);
   }
 
+  // Prefer expectedCash.byDriver as the gate source when present.
+  if (hasExpectedCashPayload) {
+    for (const cashRow of expectedCash?.byDriver ?? []) {
+      const expected = moneyValue(cashRow.totalReceived);
+      if (expected <= 0.01) continue;
+      const employeeId = String(cashRow.employeeId ?? "").trim();
+      const tasId = String(cashRow.tasId ?? "").trim();
+      const matched = pool.find((associate) => {
+        const associateId = String(associate.providerEmployeeId ?? "").trim().toUpperCase();
+        const associateEmployeeId = String(associate.employeeId ?? "").trim().toUpperCase();
+        return (employeeId && (associateId === employeeId.toUpperCase() || associateEmployeeId === employeeId.toUpperCase()))
+          || (tasId && (associateId === tasId.toUpperCase() || associateEmployeeId === tasId.toUpperCase()))
+          || associateNamesMatch(associate.displayName || associate.name, String(cashRow.driverName ?? ""));
+      });
+      if (matched) {
+        upsert({ ...matched, expected });
+        continue;
+      }
+      const driver = drivers.find((item) =>
+        String(item.employeeId ?? "").trim().toUpperCase() === employeeId.toUpperCase()
+        || String(item.tasId ?? "").trim().toUpperCase() === tasId.toUpperCase()
+      );
+      const fullName = String(driver?.driverName ?? cashRow.driverName ?? "").trim() || employeeId || tasId;
+      upsert({
+        providerEmployeeId: employeeId || tasId || fullName,
+        name: fullName,
+        displayName: fullName,
+        employeeId: employeeId || null,
+        expected,
+        pendingRecon: 0,
+        breakdown: [],
+        source: "extra",
+        shipmentType: "Cash recon worker"
+      });
+    }
+    return Array.from(byKey.values()).sort((a, b) =>
+      (a.displayName || a.name).localeCompare(b.displayName || b.name)
+    );
+  }
+
+  // Legacy fallback when worker has no expectedCash payload.
   for (const recon of reconciliation) {
     const expected = moneyValue(recon.paymentInfo?.expected);
     if (expected <= 0.01) continue;
@@ -467,14 +605,20 @@ export function buildRequiredCashAssociates(
     if (matched) {
       upsert({
         ...matched,
-        expected,
+        expected: resolveCashExpected({
+          employeeId: matched.employeeId,
+          tasId: reconId,
+          expectedCashIndex,
+          hasExpectedCashPayload,
+          reconExpected: expected
+        }),
         pendingRecon: moneyValue(recon.paymentInfo?.overallPendingRecon) || matched.pendingRecon,
         breakdown: mapBreakdown(recon.paymentInfo).length ? mapBreakdown(recon.paymentInfo) : matched.breakdown,
         source: matched.source === "other" ? "extra" : matched.source
       });
       continue;
     }
-    const mapped = fromRecon(recon, "extra", drivers);
+    const mapped = fromRecon(recon, "extra", drivers, expectedCashIndex, hasExpectedCashPayload);
     if (mapped) upsert(mapped);
   }
 

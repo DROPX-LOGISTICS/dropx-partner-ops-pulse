@@ -5,11 +5,14 @@ import type {
   CashReconAssociate,
   CashReconDriver,
   CashReconPendingBreakdown,
-  CashReconRow
+  CashReconRow,
+  ExpectedCashSummary
 } from "@/lib/ops-pulse/cash-recon-types";
 import {
   associateNamesMatch,
-  moneyValue
+  indexExpectedCashByDriver,
+  moneyValue,
+  resolveCashExpected
 } from "@/lib/ops-pulse/cash-recon-types";
 import { AssociateEntryBuilder, type AssociateOption } from "./associate-entry-builder";
 import { useRegisterCashStepRequired } from "./cash-step-gate";
@@ -75,8 +78,12 @@ function enrichCollectCash(
   dbAssociates: AssociateOption[],
   apiAssociates: CashReconAssociate[],
   drivers: CashReconDriver[],
-  reconciliation: CashReconRow[]
+  reconciliation: CashReconRow[],
+  expectedCash: ExpectedCashSummary | null
 ) {
+  const expectedCashIndex = indexExpectedCashByDriver(expectedCash);
+  const hasExpectedCashPayload = Array.isArray(expectedCash?.byDriver);
+
   return dbAssociates.map((associate) => {
     const api = findApiAssociate(associate, apiAssociates, drivers);
     const id = String(associate.providerEmployeeId ?? "").trim().toUpperCase();
@@ -96,9 +103,16 @@ function enrichCollectCash(
           || associateNamesMatch(shortName, String(row.driverInfo?.name ?? ""));
       });
 
+    // Expected COD = cash-only totalReceived (never MPOS-inclusive paymentInfo.expected when expectedCash exists).
     const expected = api
       ? Number(api.expected) || 0
-      : moneyValue(recon?.paymentInfo?.expected);
+      : resolveCashExpected({
+          employeeId: driver?.employeeId ?? associate.providerEmployeeId,
+          tasId: driver?.tasId ?? recon?.driverInfo?.id,
+          expectedCashIndex,
+          hasExpectedCashPayload,
+          reconExpected: recon?.paymentInfo?.expected
+        });
     const pendingRecon = api
       ? Number(api.pendingRecon) || 0
       : moneyValue(recon?.paymentInfo?.overallPendingRecon);
@@ -194,6 +208,7 @@ export function CashCollectionWorkspace({
   const [apiAssociates, setApiAssociates] = useState<CashReconAssociate[]>([]);
   const [apiMissingFromDer, setApiMissingFromDer] = useState<CashReconAssociate[]>([]);
   const [apiRequired, setApiRequired] = useState<CashReconAssociate[]>([]);
+  const [expectedCash, setExpectedCash] = useState<ExpectedCashSummary | null>(null);
   const [sessionSource, setSessionSource] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -241,6 +256,7 @@ export function CashCollectionWorkspace({
       setApiAssociates(Array.isArray(payload.associates) ? payload.associates : []);
       setApiMissingFromDer(Array.isArray(payload.missingFromDer) ? payload.missingFromDer : []);
       setApiRequired(Array.isArray(payload.requiredForCashEntry) ? payload.requiredForCashEntry : []);
+      setExpectedCash(payload.expectedCash && typeof payload.expectedCash === "object" ? payload.expectedCash : null);
       setSessionSource(payload.sessionSource == null ? null : String(payload.sessionSource));
       setLoaded(true);
     } catch (err) {
@@ -250,6 +266,7 @@ export function CashCollectionWorkspace({
       setApiAssociates([]);
       setApiMissingFromDer([]);
       setApiRequired([]);
+      setExpectedCash(null);
       setLoaded(false);
       setError(err instanceof Error ? err.message : "Unable to load cash recon drivers.");
     } finally {
@@ -262,8 +279,8 @@ export function CashCollectionWorkspace({
   }, [load, baselineKey]);
 
   const enriched = useMemo(
-    () => enrichCollectCash(dbAssociates, apiAssociates, drivers, reconciliation),
-    [apiAssociates, dbAssociates, drivers, reconciliation]
+    () => enrichCollectCash(dbAssociates, apiAssociates, drivers, reconciliation, expectedCash),
+    [apiAssociates, dbAssociates, drivers, expectedCash, reconciliation]
   );
 
   const missing = useMemo(

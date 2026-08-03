@@ -8,6 +8,7 @@ import {
   type CashReconDriver,
   type CashReconRow,
   type DriverReconciliationNormalized,
+  type ExpectedCashSummary,
   type LiabilitySummaryNormalized
 } from "@/lib/ops-pulse/cash-recon-types";
 
@@ -70,6 +71,7 @@ type RawDriverReconciliation = {
   driverCount?: number;
   reconciliation?: CashReconRow[];
   reconciliationCount?: number;
+  expectedCash?: ExpectedCashSummary | null;
 };
 
 export async function fetchDriverReconciliation(params: {
@@ -80,12 +82,27 @@ export async function fetchDriverReconciliation(params: {
   const raw = await postWorker<RawDriverReconciliation>("/api/admin/executive/driver-reconciliation", params);
   const drivers = Array.isArray(raw.drivers) ? raw.drivers : [];
   const reconciliation = Array.isArray(raw.reconciliation) ? raw.reconciliation : [];
+  const expectedCash = raw.expectedCash && typeof raw.expectedCash === "object"
+    ? {
+        totalReceived: moneyValue(raw.expectedCash.totalReceived),
+        shipmentCount: Number(raw.expectedCash.shipmentCount ?? 0) || 0,
+        byDriver: Array.isArray(raw.expectedCash.byDriver) ? raw.expectedCash.byDriver : [],
+        cashShipments: Array.isArray(raw.expectedCash.cashShipments) ? raw.expectedCash.cashShipments : []
+      }
+    : null;
   const { associates, missingFromDer } = buildCashReconAssociates(
     drivers,
     reconciliation,
-    params.baselineAssociates ?? []
+    params.baselineAssociates ?? [],
+    expectedCash
   );
-  const requiredForCashEntry = buildRequiredCashAssociates(reconciliation, associates, missingFromDer, drivers);
+  const requiredForCashEntry = buildRequiredCashAssociates(
+    reconciliation,
+    associates,
+    missingFromDer,
+    drivers,
+    expectedCash
+  );
 
   return {
     status: String(raw.status ?? "ok"),
@@ -97,7 +114,8 @@ export async function fetchDriverReconciliation(params: {
     associates,
     missingFromDer,
     requiredForCashEntry,
-    reconciliation
+    reconciliation,
+    expectedCash
   };
 }
 

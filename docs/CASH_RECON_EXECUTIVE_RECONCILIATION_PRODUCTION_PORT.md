@@ -17,13 +17,13 @@ On **Executive Reconciliation** (`/ops-pulse/cod/executive-reconciliation` and c
 2. **Collect cash** dropdown shows **only shipment DB associates** (`source === "shipment_data"`), not cash-recon roster rows.
 3. Collect labels prefer full worker `drivers.driverName` when matched (e.g. `Shiva Yadav / DROP / 207546749`). Do **not** strip at `/` for Collect / Missing DER labels. (`executiveDisplayName` strips at `/` — **do not** use it for Collect options.)
 4. Collect save keys use **DB** `provider_employee_id` (shipment employee id).
-5. Expected COD comes from worker `paymentInfo.expected.value` after matching DB row → driver/recon by `employeeId` / `tasId` / name.
+5. Expected COD comes from worker **`expectedCash.byDriver[].totalReceived`** (cash-only). Do **not** use `paymentInfo.expected` when `expectedCash` is present — that value includes MPOS.
 6. If `overallPendingRecon.value > 0` → modal with breakdown + manual override (remarks required) before denominations unlock.
 7. Editing expected → remarks required.
 8. **Missing from DER** = API `missingFromDer` (worker drivers/recon **not** on the DB list) + **Other**. Use the proxy response as source of truth — do **not** rebuild Missing DER with fuzzy client matching (that drops / shortens names).
 9. Missing DER **select/save id** = numeric `employeeId` when present (e.g. `2000080619110`), **not** `tasId` (e.g. `A1OJVT0C5WK65I`). Fall back to tasId only if employeeId is missing.
 10. Missing DER **display name** = full `drivers.driverName`. Resolve via `reconciliation[].driverInfo.id` → `drivers[].tasId` → `driverName`. Never show short `driverInfo.name` alone when a driver row exists.
-11. **Continue to driver validation** stays visually muted until **every** cash-recon associate with `paymentInfo.expected.value > 0` has a saved cash entry (match by `provider_employee_id` / name). Button stays clickable and opens a modal listing remaining drivers.
+11. **Continue to driver validation** stays visually muted until **every** associate with cash-only expected (`totalReceived` / associate.expected) > 0 has a saved cash entry. Button stays clickable and opens a modal listing remaining drivers.
 12. **Submit cash & run SCC** first checks `POST /api/admin/executive/liability-summary` (via Next proxy).
 13. Gate **only on cashSummary** (all ~0). **Ignore MPOS.** Ignore worker `check.passed` for blocking.
 14. Admin key **never** sent to the browser — only Next server routes/actions call the worker.
@@ -98,11 +98,38 @@ Response (relevant fields):
 | `drivers[].driverName` | Full label `Name / DROP / …` | Collect + Missing DER display |
 | `driverInfo.name` | Short name only | Matching fallback only — not UI label when driverName exists |
 | `driverInfo.id` | Same as `tasId` | Join recon → drivers |
+| `expectedCash.byDriver[].totalReceived` | **Cash-only** expected COD | Prefill Expected COD + Step-2 gate |
+| `paymentInfo.expected` | Cash + MPOS combined | **Do not use** for Expected COD when `expectedCash` is present |
+| `paymentInfo.overallPendingRecon` | Pending recon | Pending modal / override gate |
 
 Pending example fields when blocked:
 
 - `paymentInfo.overallPendingRecon.value` > 0  
-- `paymentInfo.overallPendingReconBreakdownList[]`: `trackingId`, `paymentMethod`, `moneyCollectionTime`, `amount.value`, `stationTimeZone`
+- `paymentInfo.overallPendingReconBreakdownList[]`: `trackingId`, `paymentMethod`, `moneyCollectionTime` / `transactionTime`, `amount.value`, `stationTimeZone`
+
+### 3.1a Cash-only expected (`expectedCash`)
+
+```json
+{
+  "expectedCash": {
+    "totalReceived": 81943.5,
+    "shipmentCount": 54,
+    "byDriver": [
+      {
+        "employeeId": 2000080125595,
+        "driverName": "Prakash Thakur / DROP / 208003820",
+        "tasId": "ALIY31TUBQNTG",
+        "totalReceived": 15383.2,
+        "shipmentCount": 12,
+        "shipments": []
+      }
+    ],
+    "cashShipments": []
+  }
+}
+```
+
+Match `byDriver` to Collect / Missing DER by `employeeId` or `tasId`. Set associate `expected = totalReceived`. If a driver has no `byDriver` row and `expectedCash` payload exists → expected = 0 (not recon `paymentInfo.expected`). Legacy fallback to `paymentInfo.expected` only when worker omits `expectedCash` entirely.
 
 ### 3.1b Next proxy response (what the UI consumes)
 
@@ -396,9 +423,9 @@ If production uses clean `/cod/*` URLs via middleware rewrite, set flash cookie 
 
 | Source | Collect dropdown | Save id | Expected | Pending gate |
 | --- | --- | --- | --- | --- |
-| Shipment DB matched to worker | Yes (full `driverName` if matched) | DB employee id | recon.expected | recon.pending |
-| Shipment DB no worker row | Yes (DB name) | DB employee id | 0 | none |
-| Worker-only (not in DB) | **Missing DER only** | **employeeId** (else tasId) | recon/driver expected | pending if present |
+| Shipment DB matched to worker | Yes (full `driverName` if matched) | DB employee id | `expectedCash.totalReceived` | recon.pending |
+| Shipment DB no worker row | Yes (DB name) | DB employee id | 0 (or cash total if listed) | none |
+| Worker-only (not in DB) | **Missing DER only** | **employeeId** (else tasId) | cash `totalReceived` | pending if present |
 | Other | Missing DER | `MANUAL-...` | user | none |
 
 ### 7.1 Step-2 gate (expected > 0 must be entered)
@@ -406,8 +433,11 @@ If production uses clean `/cod/*` URLs via middleware rewrite, set flash cookie 
 **Rule:** Do **not** unlock wizard Step 2 until cash has been saved for **all** associates where:
 
 ```text
-paymentInfo.expected.value > 0.01
+expectedCash.byDriver.totalReceived > 0.01
+(or associate.expected after cash-only resolution)
 ```
+
+**Do not** gate on `paymentInfo.expected` when `expectedCash` is present (that includes MPOS).
 
 **Source of truth:** `requiredForCashEntry` from the proxy (built by `buildRequiredCashAssociates`). When a baseline name matches a recon row, **merge** expected/pending onto that associate — do not drop the recon row and leave expected at 0.
 
@@ -518,6 +548,7 @@ Station example: `JDBD`, date with known worker data.
 | Client rebuilds Missing DER | Fuzzy name match drops extras / short labels | Use API `missingFromDer` as-is |
 | Missing DER uses tasId | Saves `A…` ids | Prefer `employeeId` |
 | UI uses `driverInfo.name` | `Ravi Kashyap` | Join tasId → `Name / DROP / …` |
+| Expected from `paymentInfo.expected` | Includes MPOS | Use `expectedCash.byDriver.totalReceived` |
 | Upsert without unique index | Console spam / failed persist | delete+insert (or add unique index) |
 | Persist all drivers to roster | Pollutes page rows | Persist baseline-matched only |
 | AbortController on remount | Cancels 4–8s worker call; `Error: aborted` | Ignore stale via request id |
