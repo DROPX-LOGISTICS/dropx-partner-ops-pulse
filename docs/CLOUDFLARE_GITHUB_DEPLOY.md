@@ -4,10 +4,12 @@ Connect this repo to **any** Cloudflare account in the dashboard. Do not deploy 
 
 ## Prerequisites
 
-1. **Workers Paid** plan on the target Cloudflare account  
+1. Create a **Worker** (Workers Builds / Git), **not** a Pages project. OpenNext deploys to Workers; Pages will ignore `wrangler.jsonc` and look for `pages_build_output_dir`.
+2. **Workers Paid** plan on the target Cloudflare account  
    This app’s OpenNext worker is ~4 MiB gzipped. Free plan max is **3 MiB**; Paid allows **10 MiB**.
-2. Repo pushed to GitHub (public or private; Cloudflare needs access).
-3. Node **20+** on the build image (Cloudflare default is fine).
+3. Repo pushed to GitHub (public or private; Cloudflare needs access).
+4. Use **npm** (this repo ships `package-lock.json`). Do not leave a stale `pnpm-lock.yaml` in the repo or Cloudflare CI will run `pnpm install --frozen-lockfile` and fail.
+5. Node **20+** on the build image (Cloudflare default is fine).
 
 ## 1. Push this branch to GitHub
 
