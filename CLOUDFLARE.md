@@ -2,6 +2,30 @@
 
 Your Worker is named **`dropx-partner-ops-pulse`**. OpenNext must run before Wrangler.
 
+## Workers Paid (required)
+
+This app’s Worker is ~**3.2 MiB gzipped**. Free plan max is **3 MiB**.
+
+Upgrade here (tech@dropxlogistics.com account):  
+https://dash.cloudflare.com/ab2dba58727809ae8bf0a21edb5fe7b8/workers/plans
+
+After Paid is active, redeploy:
+
+```bash
+$env:CLOUDFLARE_ACCOUNT_ID = "ab2dba58727809ae8bf0a21edb5fe7b8"
+npm run deploy
+```
+
+### Already configured on this account
+
+**Secrets** (uploaded): `SUPABASE_SERVICE_ROLE_KEY`, `CASH_RECON_ADMIN_KEY`, `COMPANY_SUPABASE_SERVICE_KEY`, `CRON_SECRET`
+
+**Vars** (in `wrangler.jsonc`): `NEXT_PUBLIC_SUPABASE_*`, `NEXT_PUBLIC_APP_URL`, `OPS_APP_URL`, `CASH_RECON_WORKER_URL`, `COMPANY_SUPABASE_URL`
+
+Still add when you have them: `EMAIL_API_KEY` / `EMAIL_FROM` (outbound email).
+
+---
+
 ## Build settings (Worker → Settings → Build)
 
 Paste **exactly**:

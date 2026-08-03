@@ -20,5 +20,13 @@
   "images": {
     "binding": "IMAGES"
   },
-  "minify": true
+  "minify": true,
+  "vars": {
+    "NEXT_PUBLIC_SUPABASE_URL": "https://syatmzatxqvvioclgqwn.supabase.co",
+    "NEXT_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InN5YXRtemF0eHF2dmlvY2xncXduIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU0ODk3MzUsImV4cCI6MjEwMTA2NTczNX0.wQI7CZnEsGnCIr5RAPLZUTXl7Rk-_EEQ5qdbwjlRF6Y",
+    "NEXT_PUBLIC_APP_URL": "https://dropx-partner-ops-pulse.dropx-logistics.workers.dev",
+    "OPS_APP_URL": "https://dropx-partner-ops-pulse.dropx-logistics.workers.dev",
+    "CASH_RECON_WORKER_URL": "https://cash-recon-worker.aj13peace.workers.dev",
+    "COMPANY_SUPABASE_URL": "https://uimajyffojydenqsegjv.supabase.co"
+  }
 }
