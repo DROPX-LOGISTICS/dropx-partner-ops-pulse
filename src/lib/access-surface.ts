@@ -1,4 +1,4 @@
-import { headers } from "next/headers";
+import { headers, type UnsafeUnwrappedHeaders } from "next/headers";
 import { isOpsRequestHost } from "@/lib/ops-host";
 
 export type AccessSurface = "dashboard" | "ops";
@@ -47,8 +47,8 @@ const sharedPageCodes = new Set([
 
 export function currentAccessSurface(): AccessSurface {
   const host = (
-    headers().get("x-forwarded-host") ??
-    headers().get("host") ??
+    (headers() as unknown as UnsafeUnwrappedHeaders).get("x-forwarded-host") ??
+    (headers() as unknown as UnsafeUnwrappedHeaders).get("host") ??
     ""
   ).split(":")[0].toLowerCase();
   return isOpsRequestHost(host) ? "ops" : "dashboard";

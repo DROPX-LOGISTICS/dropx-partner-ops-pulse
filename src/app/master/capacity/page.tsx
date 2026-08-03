@@ -12,7 +12,8 @@ export const dynamic = "force-dynamic";
 
 type SearchParams = { saved?: string; deleted?: string; initialized?: string; map_saved?: string; map_deleted?: string; size_saved?: string; route_saved?: string; route_deleted?: string; error?: string };
 
-export default async function CapacityMasterPage({ searchParams }: { searchParams?: SearchParams }) {
+export default async function CapacityMasterPage(props: { searchParams?: Promise<SearchParams> }) {
+  const searchParams = await props.searchParams;
   const authorization = await requirePagePermission("cod_master", "access");
   const companyId = requireCompanyId(authorization);
   const permission = authorization.permissions.cod_master;

@@ -24,7 +24,7 @@ import { opsNavItemsForMode } from "@/lib/ops-pulse/navigation";
 export async function AppShell({ children, active, pageCode }: { children: ReactNode; active: string; pageCode?: string }) {
   const authorization = await getAuthorization();
   if (!authorization) redirect("/login");
-  const host = headers().get("host")?.split(":")[0].toLowerCase() ?? "";
+  const host = (await headers()).get("host")?.split(":")[0].toLowerCase() ?? "";
   const isOpsHost = isOpsRequestHost(host);
   const opsAppUrl = process.env.OPS_APP_URL?.trim();
   const opsLocationsResult = isOpsHost

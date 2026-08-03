@@ -109,11 +109,12 @@ async function loadPaymentProcess(companyId: string, roleId: string | null, canS
 
 export const dynamic = "force-dynamic";
 
-export default async function PaymentProcessPage({
-  searchParams
-}: {
-  searchParams?: { processError?: string; processNotice?: string };
-}) {
+export default async function PaymentProcessPage(
+  props: {
+    searchParams?: Promise<{ processError?: string; processNotice?: string }>;
+  }
+) {
+  const searchParams = await props.searchParams;
   const authorization = await requirePagePermission("payment_process", "access");
   const companyId = requireCompanyId(authorization);
   const pagePermission = authorization.permissions.payment_process;

@@ -55,11 +55,12 @@ async function loadHistory(companyId: string) {
   return result.error ? [] : result.data ?? [];
 }
 
-export default async function AppNotificationsPage({
-  searchParams
-}: {
-  searchParams?: { sent?: string; error?: string };
-}) {
+export default async function AppNotificationsPage(
+  props: {
+    searchParams?: Promise<{ sent?: string; error?: string }>;
+  }
+) {
+  const searchParams = await props.searchParams;
   const authorization = await requirePagePermission("notifications_app", "access");
   const companyId = requireCompanyId(authorization);
   const recipients = await loadRecipients(companyId);

@@ -54,7 +54,7 @@ function safeNextPath(value: FormDataEntryValue | null) {
 }
 
 export async function signInWithGoogle(formData: FormData) {
-  const requestHeaders = headers();
+  const requestHeaders = await headers();
   const origin = authOriginFromHeaders(requestHeaders);
   // Always use Ops auth storage in this Ops-only package.
   const supabase = createServerSupabaseClient(undefined, true);

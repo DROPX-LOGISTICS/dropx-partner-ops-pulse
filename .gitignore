@@ -1,7 +1,11 @@
 .next
+.open-next
+.wrangler
 node_modules
 .env.local
 .env*.local
+.dev.vars
+.dev.vars.production
 *.log
 dist
 out
@@ -13,9 +17,11 @@ tmp-*.env
 *.env
 build-output.txt
 deploy-output.txt
+cloudflare-env.d.ts
 
 .vercel
 .env*
-package-lock.json
+# Keep lockfile for Cloudflare / CI installs
+# package-lock.json
 ./node_modules
 */node_modules

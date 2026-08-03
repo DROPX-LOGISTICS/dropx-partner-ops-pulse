@@ -1,6 +1,6 @@
 "use server";
 
-import { cookies } from "next/headers";
+import { cookies, type UnsafeUnwrappedCookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { getAuthorization, hasPermission } from "@/lib/authorization";
@@ -13,7 +13,7 @@ function clean(value: FormDataEntryValue | null) {
 }
 
 function mappingRedirect(params: { error?: string; notice?: string }) {
-  cookies().set("dropx_provider_mapping_flash", JSON.stringify(params), {
+  (cookies() as unknown as UnsafeUnwrappedCookies).set("dropx_provider_mapping_flash", JSON.stringify(params), {
     httpOnly: true,
     maxAge: 15,
     path: "/provider-mapping",

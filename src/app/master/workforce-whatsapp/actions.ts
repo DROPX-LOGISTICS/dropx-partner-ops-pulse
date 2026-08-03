@@ -1,6 +1,6 @@
 "use server";
 
-import { cookies } from "next/headers";
+import { cookies, type UnsafeUnwrappedCookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requirePagePermission } from "@/lib/authorization";
@@ -9,7 +9,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { WORKFORCE_APPLICANT_EVENT, WORKFORCE_APPLICANT_TEMPLATE } from "@/lib/workforce-applicant-whatsapp";
 
 function finish(payload: { error?: string; notice?: string }): never {
-  cookies().set("dropx_workforce_whatsapp_flash", JSON.stringify(payload), {
+  (cookies() as unknown as UnsafeUnwrappedCookies).set("dropx_workforce_whatsapp_flash", JSON.stringify(payload), {
     httpOnly: true, maxAge: 20, path: "/master/workforce-whatsapp", sameSite: "lax"
   });
   redirect("/master/workforce-whatsapp");

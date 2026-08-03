@@ -1,4 +1,4 @@
-import { cookies } from "next/headers";
+import { cookies, type UnsafeUnwrappedCookies } from "next/headers";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import { PendingLink } from "@/components/pending-link";
@@ -36,7 +36,7 @@ type UserOption = {
 };
 
 function loadFlash() {
-  const raw = cookies().get("dropx_document_master_flash")?.value;
+  const raw = (cookies() as unknown as UnsafeUnwrappedCookies).get("dropx_document_master_flash")?.value;
   if (!raw) return { error: null as string | null, notice: null as string | null };
   try {
     const parsed = JSON.parse(raw) as { error?: unknown; notice?: unknown };
@@ -139,7 +139,7 @@ async function loadDocumentTypes(companyId: string) {
     const documentTypeId = String(row.document_type_id ?? "");
     const roleId = String(row.role_id ?? "");
     if (!documentTypeId || !roleId) return;
-    accessRolesByDocumentType.set(documentTypeId, [...accessRolesByDocumentType.get(documentTypeId) ?? [], roleId]);
+    accessRolesByDocumentType.set(documentTypeId, [...(accessRolesByDocumentType.get(documentTypeId) ?? []), roleId]);
   });
   const settingsError = settingsResult.error?.message ?? null;
   return {
@@ -252,7 +252,10 @@ function DocumentForm({
 
 export const dynamic = "force-dynamic";
 
-export default async function DocumentsPage({ searchParams }: { searchParams?: { add?: string; edit?: string; q?: string } }) {
+export default async function DocumentsPage(
+  props: { searchParams?: Promise<{ add?: string; edit?: string; q?: string }> }
+) {
+  const searchParams = await props.searchParams;
   const authorization = await requirePagePermission("master_documents", "access");
   const companyId = requireCompanyId(authorization);
   const pagePermission = authorization.permissions.master_documents;

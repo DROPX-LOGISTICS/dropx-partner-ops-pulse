@@ -1,4 +1,4 @@
-import { cookies } from "next/headers";
+import { cookies, type UnsafeUnwrappedCookies } from "next/headers";
 import { notFound } from "next/navigation";
 import { AppShell } from "@/components/app-shell";
 import { EmailRecipientInput, type EmailRecipientOption } from "@/components/email-recipient-input";
@@ -89,7 +89,7 @@ function defaultTemplate(eventType: PaymentEmailEventType): TemplateRow {
 }
 
 function loadFlash(eventType: PaymentEmailEventType) {
-  const raw = cookies().get(`dropx_payment_notification_${eventType}_flash`)?.value;
+  const raw = (cookies() as unknown as UnsafeUnwrappedCookies).get(`dropx_payment_notification_${eventType}_flash`)?.value;
   if (!raw) return { error: null as string | null, notice: null as string | null };
   try {
     const parsed = JSON.parse(raw) as { error?: unknown; notice?: unknown };
@@ -249,11 +249,12 @@ function ApprovalRecipientSection({
 
 export const dynamic = "force-dynamic";
 
-export default async function PaymentNotificationTemplatePage({
-  params
-}: {
-  params: { event: string };
-}) {
+export default async function PaymentNotificationTemplatePage(
+  props: {
+    params: Promise<{ event: string }>;
+  }
+) {
+  const params = await props.params;
   const eventConfig = eventMap[params.event];
   if (!eventConfig) notFound();
   const authorization = await requirePagePermission("app_settings", "access");

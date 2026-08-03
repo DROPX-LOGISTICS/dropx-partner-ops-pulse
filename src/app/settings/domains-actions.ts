@@ -1,14 +1,14 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { cookies } from "next/headers";
+import { cookies, type UnsafeUnwrappedCookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 function redirectWithFlash(params: { error?: string; notice?: string }): never {
-  cookies().set("dropx_domains_settings_flash", JSON.stringify(params), {
+  (cookies() as unknown as UnsafeUnwrappedCookies).set("dropx_domains_settings_flash", JSON.stringify(params), {
     httpOnly: true,
     maxAge: 20,
     path: "/settings",

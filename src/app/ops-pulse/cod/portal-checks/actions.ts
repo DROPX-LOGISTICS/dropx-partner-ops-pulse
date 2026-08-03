@@ -1,6 +1,6 @@
 "use server";
 
-import { cookies } from "next/headers";
+import { cookies, type UnsafeUnwrappedCookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requirePagePermission } from "@/lib/authorization";
@@ -11,7 +11,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 const path = "/ops-pulse/cod/portal-checks";
 
 function setFlash(params: { error?: string; notice?: string }) {
-  cookies().set("dropx_cod_portal_checks_flash", JSON.stringify(params), {
+  (cookies() as unknown as UnsafeUnwrappedCookies).set("dropx_cod_portal_checks_flash", JSON.stringify(params), {
     httpOnly: true,
     maxAge: 30,
     path,

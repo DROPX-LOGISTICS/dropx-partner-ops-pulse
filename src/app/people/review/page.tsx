@@ -178,18 +178,19 @@ async function loadReviewProfiles(
 
 export const dynamic = "force-dynamic";
 
-export default async function PeopleReviewPage({
-  searchParams
-}: {
-  searchParams?: {
-    category?: string;
-    error?: string;
-    issue?: string;
-    notice?: string;
-    review?: string;
-    search?: string;
-  };
-}) {
+export default async function PeopleReviewPage(
+  props: {
+    searchParams?: Promise<{
+      category?: string;
+      error?: string;
+      issue?: string;
+      notice?: string;
+      review?: string;
+      search?: string;
+    }>;
+  }
+) {
+  const searchParams = await props.searchParams;
   const authorization = await requirePagePermission("people_review", "access");
   const companyId = requireCompanyId(authorization);
   const permission = authorization.permissions.people_review;

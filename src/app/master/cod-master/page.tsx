@@ -1,4 +1,4 @@
-import { cookies } from "next/headers";
+import { cookies, type UnsafeUnwrappedCookies } from "next/headers";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import { SearchableSelect } from "@/components/searchable-select";
@@ -11,7 +11,7 @@ import { isSupabaseAdminConfigured } from "@/lib/supabase-admin";
 import { createCodMaster, deleteCodMaster, updateCodMaster } from "./actions";
 
 function loadFlash() {
-  const raw = cookies().get("dropx_cod_master_flash")?.value;
+  const raw = (cookies() as unknown as UnsafeUnwrappedCookies).get("dropx_cod_master_flash")?.value;
   if (!raw) return { error: null as string | null, notice: null as string | null };
   try {
     const parsed = JSON.parse(raw) as { error?: unknown; notice?: unknown };

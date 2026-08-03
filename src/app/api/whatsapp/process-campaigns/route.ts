@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { waitUntil } from "@vercel/functions";
+import { waitUntil } from "@/lib/wait-until";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { templateHeaderMediaComponent } from "@/lib/whatsapp-media";
 import { extractWhatsAppTemplateVariables, type WhatsAppTemplateComponent, type WhatsAppTemplateHeaderMediaType } from "@/lib/whatsapp-template";

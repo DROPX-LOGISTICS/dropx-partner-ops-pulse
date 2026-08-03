@@ -1,4 +1,4 @@
-import { cookies } from "next/headers";
+import { cookies, type UnsafeUnwrappedCookies } from "next/headers";
 import { UserRound } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
 import { EmployeeActionMenu } from "@/components/employee-action-menu";
@@ -90,7 +90,7 @@ function firstRelation<T>(value: T | T[] | null | undefined) {
 }
 
 function loadFlash() {
-  const raw = cookies().get("dropx_employees_flash")?.value;
+  const raw = (cookies() as unknown as UnsafeUnwrappedCookies).get("dropx_employees_flash")?.value;
   if (!raw) return { error: null as string | null, notice: null as string | null };
   try {
     const parsed = JSON.parse(raw) as { error?: unknown; notice?: unknown };
@@ -406,7 +406,8 @@ async function loadEmployees(companyId: string, locationScopeIds: string[], hasA
 
 export const dynamic = "force-dynamic";
 
-export default async function EmployeesPage({ searchParams }: { searchParams?: { edit?: string; view?: string } }) {
+export default async function EmployeesPage(props: { searchParams?: Promise<{ edit?: string; view?: string }> }) {
+  const searchParams = await props.searchParams;
   const authorization = await requirePagePermission("employees", "access");
   const companyId = requireCompanyId(authorization);
   const pagePermission = authorization.permissions.employees;

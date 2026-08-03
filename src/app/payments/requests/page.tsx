@@ -203,11 +203,12 @@ async function loadReturnRemark(companyId: string, requestId: string) {
 
 export const dynamic = "force-dynamic";
 
-export default async function PaymentRequestsPage({
-  searchParams
-}: {
-  searchParams?: { bank?: string; paymentError?: string; paymentNotice?: string; resubmit?: string };
-}) {
+export default async function PaymentRequestsPage(
+  props: {
+    searchParams?: Promise<{ bank?: string; paymentError?: string; paymentNotice?: string; resubmit?: string }>;
+  }
+) {
+  const searchParams = await props.searchParams;
   const authorization = await requirePagePermission("payment_requests", "access");
   const companyId = requireCompanyId(authorization);
   const pagePermission = authorization.permissions.payment_requests;

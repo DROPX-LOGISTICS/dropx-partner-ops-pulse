@@ -1,6 +1,6 @@
 "use server";
 
-import { cookies } from "next/headers";
+import { cookies, type UnsafeUnwrappedCookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requirePagePermission } from "@/lib/authorization";
@@ -62,7 +62,7 @@ function eventPath(eventType: PaymentEmailEventType) {
 }
 
 function redirectWithFlash(eventType: PaymentEmailEventType, params: { error?: string; notice?: string }): never {
-  cookies().set(`dropx_payment_notification_${eventType}_flash`, JSON.stringify(params), {
+  (cookies() as unknown as UnsafeUnwrappedCookies).set(`dropx_payment_notification_${eventType}_flash`, JSON.stringify(params), {
     httpOnly: true,
     maxAge: 20,
     path: eventPath(eventType),

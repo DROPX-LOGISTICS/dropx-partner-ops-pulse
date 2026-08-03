@@ -20,7 +20,7 @@ export default async function WorkforceWhatsAppMasterPage() {
     supabaseAdmin.from("recruitment_station_contacts")
       .select("station_code,poc_mobile,address").eq("company_id", companyId)
   ]) : [{ data: null, error: { message: "Supabase is not configured." } }, { data: [], error: null }];
-  const raw = cookies().get("dropx_workforce_whatsapp_flash")?.value;
+  const raw = (await cookies()).get("dropx_workforce_whatsapp_flash")?.value;
   let flash: { error?: string; notice?: string } = {};
   try { flash = raw ? JSON.parse(raw) : {}; } catch {}
   const rows = contacts.data ?? [];

@@ -55,7 +55,8 @@ function totals(rows: CapacityDeliveryBreakdown[]) {
   return rows.reduce(addRow, emptyTotals());
 }
 
-export default async function DeliveryDataPage({ searchParams }: { searchParams?: SearchParams }) {
+export default async function DeliveryDataPage(props: { searchParams?: Promise<SearchParams> }) {
+  const searchParams = await props.searchParams;
   const authorization = await requirePagePermission("cps_shipments", "access");
   const companyId = requireCompanyId(authorization);
   const locationsResult = await loadCodLocations(companyId, authorization.locationScopeIds, authorization.hasAllLocationAccess);

@@ -1,4 +1,4 @@
-import { cookies } from "next/headers";
+import { cookies, type UnsafeUnwrappedCookies } from "next/headers";
 import { AppShell } from "@/components/app-shell";
 import { MessagingSettingsPanel } from "@/components/messaging-settings-panel";
 import { PageHead } from "@/components/page-head";
@@ -9,7 +9,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 export const dynamic = "force-dynamic";
 
 function loadFlash() {
-  const raw = cookies().get("dropx_messaging_settings_flash")?.value;
+  const raw = (cookies() as unknown as UnsafeUnwrappedCookies).get("dropx_messaging_settings_flash")?.value;
   if (!raw) return { error: null as string | null, notice: null as string | null };
   try {
     const parsed = JSON.parse(raw) as { error?: unknown; notice?: unknown };

@@ -79,13 +79,14 @@ async function loadModels(companyId: string) {
 export const dynamic = "force-dynamic";
 
 type ModelsPageProps = {
-  searchParams?: {
+  searchParams?: Promise<{
     add?: string;
     edit?: string;
-  };
+  }>;
 };
 
-export default async function ModelsPage({ searchParams }: ModelsPageProps) {
+export default async function ModelsPage(props: ModelsPageProps) {
+  const searchParams = await props.searchParams;
   const authorization = await requirePagePermission("master_models", "access");
   const companyId = requireCompanyId(authorization);
   const pagePermission = authorization.permissions.master_models;

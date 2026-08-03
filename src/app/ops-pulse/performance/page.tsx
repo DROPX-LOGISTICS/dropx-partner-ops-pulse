@@ -153,7 +153,8 @@ function trendPath(values: number[], width = 240, height = 62) {
   }).join(" ");
 }
 
-export default async function PerformancePage({ searchParams }: { searchParams?: SearchParams }) {
+export default async function PerformancePage(props: { searchParams?: Promise<SearchParams> }) {
+  const searchParams = await props.searchParams;
   const authorization = await requirePagePermission("cod_reports", "access");
   const companyId = requireCompanyId(authorization);
   const targetResult = await loadPerformanceTargets(companyId);

@@ -1,4 +1,4 @@
-import { cookies, headers } from "next/headers";
+import { cookies, headers, type UnsafeUnwrappedCookies, type UnsafeUnwrappedHeaders } from "next/headers";
 import type { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
@@ -32,8 +32,8 @@ function decodeCookieValue(value: string) {
 }
 
 function cookieDomain() {
-  const host = headers().get("x-forwarded-host")?.split(":")[0].toLowerCase() ??
-    headers().get("host")?.split(":")[0].toLowerCase() ??
+  const host = (headers() as unknown as UnsafeUnwrappedHeaders).get("x-forwarded-host")?.split(":")[0].toLowerCase() ??
+    (headers() as unknown as UnsafeUnwrappedHeaders).get("host")?.split(":")[0].toLowerCase() ??
     "";
 
   return host.endsWith("dropxlogistics.com") ? ".dropxlogistics.com" : undefined;
@@ -42,7 +42,7 @@ function cookieDomain() {
 export function createServerSupabaseClient(response?: NextResponse, forceOpsStorage?: boolean) {
   if (!supabaseUrl || !supabaseAuthKey) return null;
 
-  const cookieStore = cookies();
+  const cookieStore = (cookies() as unknown as UnsafeUnwrappedCookies);
   // This package is Ops-only; always prefer Ops auth storage unless explicitly overridden.
   const useOpsStorage = forceOpsStorage ?? true;
   const cookieOptions = {

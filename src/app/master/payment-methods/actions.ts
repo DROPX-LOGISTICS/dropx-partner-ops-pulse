@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { cookies } from "next/headers";
+import { cookies, type UnsafeUnwrappedCookies } from "next/headers";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId, withCompany } from "@/lib/company-scope";
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -21,7 +21,7 @@ function required(value: FormDataEntryValue | null, field: string) {
 }
 
 function paymentMethodRedirect(params: { error?: string; notice?: string }) {
-  cookies().set("dropx_payment_method_flash", JSON.stringify(params), {
+  (cookies() as unknown as UnsafeUnwrappedCookies).set("dropx_payment_method_flash", JSON.stringify(params), {
     httpOnly: true,
     maxAge: 15,
     path: "/master/payment-methods",

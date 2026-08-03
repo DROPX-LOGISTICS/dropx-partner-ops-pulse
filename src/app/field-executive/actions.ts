@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createHash, randomBytes } from "node:crypto";
-import { waitUntil } from "@vercel/functions";
+import { waitUntil } from "@/lib/wait-until";
 import * as XLSX from "xlsx";
 import { requirePagePermission } from "@/lib/authorization";
 import { syncBiometricEnrolment } from "@/lib/biometric/enrolments";

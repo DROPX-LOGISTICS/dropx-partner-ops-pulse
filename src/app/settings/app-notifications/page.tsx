@@ -36,11 +36,12 @@ async function loadSettings(companyId: string) {
   return { enabled, error: null as string | null };
 }
 
-export default async function AppNotificationSettingsPage({
-  searchParams
-}: {
-  searchParams?: { error?: string; saved?: string };
-}) {
+export default async function AppNotificationSettingsPage(
+  props: {
+    searchParams?: Promise<{ error?: string; saved?: string }>;
+  }
+) {
+  const searchParams = await props.searchParams;
   const authorization = await requirePagePermission("app_settings", "access");
   const companyId = requireCompanyId(authorization);
   const permission = authorization.permissions.app_settings;

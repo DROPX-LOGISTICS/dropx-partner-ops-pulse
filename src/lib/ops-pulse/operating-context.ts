@@ -1,4 +1,4 @@
-import { cookies } from "next/headers";
+import { cookies, type UnsafeUnwrappedCookies } from "next/headers";
 import type { CodLocationRow } from "@/lib/ops-pulse/cod";
 import { locationModelName, providerName } from "@/lib/ops-pulse/cod";
 
@@ -34,15 +34,15 @@ export function locationsForMode(locations: CodLocationRow[], mode: OperatingMod
 
 export function resolveOperatingContext(locations: CodLocationRow[]) {
   const availableModes = operatingModes.filter((mode) => locationsForMode(locations, mode.code).length);
-  const requestedMode = cookies().get("dropx-ops-mode")?.value as OperatingMode | undefined;
+  const requestedMode = (cookies() as unknown as UnsafeUnwrappedCookies).get("dropx-ops-mode")?.value as OperatingMode | undefined;
   const mode = availableModes.some((entry) => entry.code === requestedMode)
     ? requestedMode!
     : availableModes[0]?.code ?? "amazon_edsp";
   const modeLocations = locationsForMode(locations, mode);
-  const requestedLocationIds = (cookies().get("dropx-ops-locations")?.value ?? "")
+  const requestedLocationIds = ((cookies() as unknown as UnsafeUnwrappedCookies).get("dropx-ops-locations")?.value ?? "")
     .split(",")
     .filter(Boolean);
-  const requestedLocationId = cookies().get("dropx-ops-location")?.value;
+  const requestedLocationId = (cookies() as unknown as UnsafeUnwrappedCookies).get("dropx-ops-location")?.value;
   const selectedLocations = modeLocations.filter((entry) => requestedLocationIds.includes(entry.id));
   const scopedLocations = selectedLocations.length
     ? selectedLocations

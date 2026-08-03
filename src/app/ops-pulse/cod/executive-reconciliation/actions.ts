@@ -1,9 +1,9 @@
 "use server";
 
-import { cookies } from "next/headers";
+import { cookies, type UnsafeUnwrappedCookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { waitUntil } from "@vercel/functions";
+import { waitUntil } from "@/lib/wait-until";
 import { requireCompanyId, withCompany } from "@/lib/company-scope";
 import {
   clean,
@@ -20,7 +20,7 @@ const publicPagePath = "/cod/executive-reconciliation";
 
 function redirectWithFlash(params: { error?: string; notice?: string }, href = publicPagePath): never {
   // path "/" so flash works on both /cod/* (ops host) and /ops-pulse/cod/* URLs
-  cookies().set("dropx_cod_executive_reconciliation_flash", JSON.stringify(params), {
+  (cookies() as unknown as UnsafeUnwrappedCookies).set("dropx_cod_executive_reconciliation_flash", JSON.stringify(params), {
     httpOnly: true,
     maxAge: 25,
     path: "/",

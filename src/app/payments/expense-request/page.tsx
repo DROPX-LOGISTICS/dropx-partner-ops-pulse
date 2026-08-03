@@ -163,11 +163,12 @@ async function loadExpenseRequestData(companyId: string) {
 
 export const dynamic = "force-dynamic";
 
-export default async function ExpenseRequestPage({
-  searchParams
-}: {
-  searchParams?: { bank?: string; expenseError?: string; expenseNotice?: string };
-}) {
+export default async function ExpenseRequestPage(
+  props: {
+    searchParams?: Promise<{ bank?: string; expenseError?: string; expenseNotice?: string }>;
+  }
+) {
+  const searchParams = await props.searchParams;
   const authorization = await requirePagePermission("expense_requests", "access");
   const companyId = requireCompanyId(authorization);
   const pagePermission = authorization.permissions.expense_requests;

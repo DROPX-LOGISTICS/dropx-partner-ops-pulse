@@ -35,10 +35,10 @@ export async function switchOperatingContext(formData: FormData) {
     sameSite: "lax" as const,
     secure: process.env.NODE_ENV === "production"
   };
-  cookies().set("dropx-ops-mode", mode, options);
+  (await cookies()).set("dropx-ops-mode", mode, options);
   if (location) {
-    cookies().set("dropx-ops-location", location.id, options);
-    cookies().set("dropx-ops-locations", scopedLocations.map((entry) => entry.id).join(","), options);
+    (await cookies()).set("dropx-ops-location", location.id, options);
+    (await cookies()).set("dropx-ops-locations", scopedLocations.map((entry) => entry.id).join(","), options);
   }
   redirect("/ops-pulse");
 }

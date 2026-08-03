@@ -1,4 +1,4 @@
-import { cookies } from "next/headers";
+import { cookies, type UnsafeUnwrappedCookies } from "next/headers";
 import { AppShell } from "@/components/app-shell";
 import { DesignationForm } from "@/components/designation-form";
 import { PageHead } from "@/components/page-head";
@@ -54,7 +54,7 @@ type WorkforceCategoryRow = {
 };
 
 function loadFlash() {
-  const raw = cookies().get("dropx_designation_flash")?.value;
+  const raw = (cookies() as unknown as UnsafeUnwrappedCookies).get("dropx_designation_flash")?.value;
   if (!raw) return { error: null as string | null, notice: null as string | null };
   try {
     const parsed = JSON.parse(raw) as { error?: unknown; notice?: unknown };
@@ -183,11 +183,12 @@ async function loadDesignations(companyId: string, locationScopeIds: string[], h
 
 export const dynamic = "force-dynamic";
 
-export default async function DesignationsPage({
-  searchParams
-}: {
-  searchParams?: { add?: string; edit?: string; q?: string };
-}) {
+export default async function DesignationsPage(
+  props: {
+    searchParams?: Promise<{ add?: string; edit?: string; q?: string }>;
+  }
+) {
+  const searchParams = await props.searchParams;
   const authorization = await requirePagePermission("designations", "access");
   const companyId = requireCompanyId(authorization);
   const pagePermission = authorization.permissions.designations;

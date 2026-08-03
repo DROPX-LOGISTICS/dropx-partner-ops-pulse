@@ -1,4 +1,4 @@
-import { cookies } from "next/headers";
+import { cookies, type UnsafeUnwrappedCookies } from "next/headers";
 import { AppShell } from "@/components/app-shell";
 import { MetaChannelProfilesPanel, type MetaChannelProfile } from "@/components/meta-channel-profiles-panel";
 import { MetaMessagingSettingsPanel } from "@/components/meta-messaging-settings-panel";
@@ -12,7 +12,7 @@ import type { WhatsAppTemplateComponent } from "@/lib/whatsapp-template";
 export const dynamic = "force-dynamic";
 
 function loadFlash() {
-  const raw = cookies().get("dropx_meta_messaging_settings_flash")?.value;
+  const raw = (cookies() as unknown as UnsafeUnwrappedCookies).get("dropx_meta_messaging_settings_flash")?.value;
   if (!raw) return { error: null as string | null, notice: null as string | null };
   try {
     const parsed = JSON.parse(raw) as { error?: unknown; notice?: unknown };
@@ -23,7 +23,7 @@ function loadFlash() {
 }
 
 function loadWhatsAppFlash() {
-  const raw = cookies().get("dropx_whatsapp_settings_flash")?.value;
+  const raw = (cookies() as unknown as UnsafeUnwrappedCookies).get("dropx_whatsapp_settings_flash")?.value;
   if (!raw) return { error: null as string | null, notice: null as string | null };
   try {
     const parsed = JSON.parse(raw) as { error?: unknown; notice?: unknown };
@@ -191,11 +191,12 @@ async function loadMetaChannelProfiles(channel: "facebook" | "instagram", compan
   return { profiles, error: null as string | null };
 }
 
-export default async function MetaMessagingSettingsPage({
-  searchParams
-}: {
-  searchParams?: { platform?: string };
-}) {
+export default async function MetaMessagingSettingsPage(
+  props: {
+    searchParams?: Promise<{ platform?: string }>;
+  }
+) {
+  const searchParams = await props.searchParams;
   const authorization = await requirePagePermission("app_settings", "access");
   const companyId = requireCompanyId(authorization);
   const permission = authorization.permissions.app_settings;

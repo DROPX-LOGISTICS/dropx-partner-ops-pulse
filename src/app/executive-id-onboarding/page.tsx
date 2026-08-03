@@ -31,7 +31,8 @@ function isOnboardingRow(row: ImportRow) {
 }
 function daysSince(value: string) { return Math.max(0, Math.floor((Date.now() - new Date(`${value}T00:00:00+05:30`).getTime()) / 86400000)); }
 
-export default async function ExecutiveIdOnboardingPage({ searchParams }: { searchParams?: SearchParams }) {
+export default async function ExecutiveIdOnboardingPage(props: { searchParams?: Promise<SearchParams> }) {
+  const searchParams = await props.searchParams;
   const authorization = await requirePagePermission("cod_reports", "access");
   const companyId = requireCompanyId(authorization);
   const { locations } = await loadCodLocations(companyId, authorization.locationScopeIds, authorization.hasAllLocationAccess);

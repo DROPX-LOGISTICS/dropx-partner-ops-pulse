@@ -131,20 +131,21 @@ async function loadLocations(companyId: string, locationScopeIds: string[], hasA
 
 export const dynamic = "force-dynamic";
 
-export default async function AttendanceReportsPage({
-  searchParams
-}: {
-  searchParams?: {
-    date?: string;
-    from_date?: string;
-    location_id?: string;
-    mode?: string;
-    month?: string;
-    report?: string;
-    sort?: string;
-    to_date?: string;
-  };
-}) {
+export default async function AttendanceReportsPage(
+  props: {
+    searchParams?: Promise<{
+      date?: string;
+      from_date?: string;
+      location_id?: string;
+      mode?: string;
+      month?: string;
+      report?: string;
+      sort?: string;
+      to_date?: string;
+    }>;
+  }
+) {
+  const searchParams = await props.searchParams;
   const authorization = await requirePagePermission("attendance_reports", "access");
   const companyId = requireCompanyId(authorization);
   const mode = safeMode(searchParams?.mode);

@@ -38,7 +38,8 @@ function bankLabel(code: string) {
 
 export const dynamic = "force-dynamic";
 
-export default async function PaymentBanksPage({ searchParams }: { searchParams?: { edit?: string } }) {
+export default async function PaymentBanksPage(props: { searchParams?: Promise<{ edit?: string }> }) {
+  const searchParams = await props.searchParams;
   const authorization = await requirePagePermission("master_payment_banks", "access");
   const companyId = requireCompanyId(authorization);
   const pagePermission = authorization.permissions.master_payment_banks;

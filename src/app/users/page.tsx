@@ -80,20 +80,22 @@ type RawLocationRow = Omit<LocationRow, "providers" | "location_models"> & {
   location_models?: { code: string; name: string } | { code: string; name: string }[] | null;
 };
 
+type UsersSearchParams = {
+  addUser?: string;
+  addRole?: string;
+  editUser?: string;
+  editRole?: string;
+  userPage?: string;
+  userRole?: string;
+  userSearch?: string;
+  userType?: string;
+  userError?: string;
+  userNotice?: string;
+  section?: string;
+};
+
 type UsersPageProps = {
-  searchParams?: {
-    addUser?: string;
-    addRole?: string;
-    editUser?: string;
-    editRole?: string;
-    userPage?: string;
-    userRole?: string;
-    userSearch?: string;
-    userType?: string;
-    userError?: string;
-    userNotice?: string;
-    section?: string;
-  };
+  searchParams?: Promise<UsersSearchParams>;
 };
 
 function firstRelation<T>(value: T | T[] | null | undefined) {
@@ -185,7 +187,7 @@ function userStatus(user: UserRow) {
   return "Active";
 }
 
-function usersReturnHref(searchParams: UsersPageProps["searchParams"]) {
+function usersReturnHref(searchParams: UsersSearchParams | undefined) {
   const params = new URLSearchParams();
   params.set("section", "users");
   const page = Number(searchParams?.userPage ?? "1");
@@ -381,7 +383,8 @@ async function loadAccessData(
 
 export const dynamic = "force-dynamic";
 
-export default async function UsersPage({ searchParams }: UsersPageProps) {
+export default async function UsersPage(props: UsersPageProps) {
+  const searchParams = await props.searchParams;
   const authorization = await requirePagePermission("users", "access");
   const companyId = requireCompanyId(authorization);
   const accessSurface = currentAccessSurface();

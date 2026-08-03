@@ -1,4 +1,4 @@
-import { cookies } from "next/headers";
+import { cookies, type UnsafeUnwrappedCookies } from "next/headers";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import { PendingLink } from "@/components/pending-link";
@@ -66,7 +66,7 @@ type WorkerInfo = {
 };
 
 function loadFlash() {
-  const raw = cookies().get("dropx_biometric_devices_flash")?.value;
+  const raw = (cookies() as unknown as UnsafeUnwrappedCookies).get("dropx_biometric_devices_flash")?.value;
   if (!raw) return { error: null as string | null, notice: null as string | null };
   try {
     const parsed = JSON.parse(raw) as { error?: unknown; notice?: unknown };
@@ -358,11 +358,12 @@ function DeviceStatusPanel({
 
 export const dynamic = "force-dynamic";
 
-export default async function DeviceMasterPage({
-  searchParams
-}: {
-  searchParams?: { add?: string; edit?: string; q?: string };
-}) {
+export default async function DeviceMasterPage(
+  props: {
+    searchParams?: Promise<{ add?: string; edit?: string; q?: string }>;
+  }
+) {
+  const searchParams = await props.searchParams;
   const authorization = await requirePagePermission("biometric_devices", "access");
   const companyId = requireCompanyId(authorization);
   const pagePermission = authorization.permissions.biometric_devices;

@@ -48,7 +48,11 @@ function addBreakdown(total: DeliveryTotals, row: CapacityDeliveryBreakdown) {
   return total;
 }
 
-export default async function AssociateCapacityPage({ params, searchParams }: { params: { id: string }; searchParams?: SearchParams }) {
+export default async function AssociateCapacityPage(
+  props: { params: Promise<{ id: string }>; searchParams?: Promise<SearchParams> }
+) {
+  const searchParams = await props.searchParams;
+  const params = await props.params;
   const authorization = await requirePagePermission("cps_associates", "access");
   const companyId = requireCompanyId(authorization);
   const id = decodeURIComponent(params.id);

@@ -11,7 +11,8 @@ import { addPerformanceMetric, removePerformanceMetric, updatePerformanceTarget 
 export const dynamic = "force-dynamic";
 type SearchParams = { view?: string; saved?: string; added?: string; deleted?: string; error?: string };
 
-export default async function PerformanceTargetMaster({ searchParams }: { searchParams?: SearchParams }) {
+export default async function PerformanceTargetMaster(props: { searchParams?: Promise<SearchParams> }) {
+  const searchParams = await props.searchParams;
   const authorization = await requirePagePermission("cod_master", "access");
   const companyId = requireCompanyId(authorization);
   const permission = authorization.permissions.cod_master;

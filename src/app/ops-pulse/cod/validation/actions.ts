@@ -1,6 +1,6 @@
 "use server";
 
-import { cookies } from "next/headers";
+import { cookies, type UnsafeUnwrappedCookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requirePagePermission } from "@/lib/authorization";
@@ -9,7 +9,7 @@ import { clean, codValidationStatuses, numberFromForm, required, type CodValidat
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 function redirectWithFlash(params: { error?: string; notice?: string }) {
-  cookies().set("dropx_cod_validation_flash", JSON.stringify(params), {
+  (cookies() as unknown as UnsafeUnwrappedCookies).set("dropx_cod_validation_flash", JSON.stringify(params), {
     httpOnly: true,
     maxAge: 25,
     path: "/ops-pulse/cod/validation",

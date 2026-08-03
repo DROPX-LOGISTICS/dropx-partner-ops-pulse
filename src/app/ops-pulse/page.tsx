@@ -132,7 +132,8 @@ async function shipmentFacts(companyId: string, stationCodes: string[], from: st
   return { error: error?.message ?? null, rows: (data ?? []) as ShipmentFact[] };
 }
 
-export default async function OpsPulsePage({ searchParams }: { searchParams?: SearchParams }) {
+export default async function OpsPulsePage(props: { searchParams?: Promise<SearchParams> }) {
+  const searchParams = await props.searchParams;
   const authorization = await requirePagePermission("ops_pulse", "access");
   const companyId = requireCompanyId(authorization);
   const locationsResult = await loadCodLocations(

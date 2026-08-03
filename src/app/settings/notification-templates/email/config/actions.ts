@@ -1,6 +1,6 @@
 "use server";
 
-import { cookies } from "next/headers";
+import { cookies, type UnsafeUnwrappedCookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requirePagePermission } from "@/lib/authorization";
@@ -20,7 +20,7 @@ function required(value: FormDataEntryValue | null, field: string) {
 }
 
 function redirectWithFlash(params: { error?: string; notice?: string }): never {
-  cookies().set("dropx_email_config_flash", JSON.stringify(params), {
+  (cookies() as unknown as UnsafeUnwrappedCookies).set("dropx_email_config_flash", JSON.stringify(params), {
     httpOnly: true,
     maxAge: 20,
     path: "/settings/notification-templates/email/config",

@@ -1,4 +1,4 @@
-import { cookies } from "next/headers";
+import { cookies, type UnsafeUnwrappedCookies } from "next/headers";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import { SearchableSelect } from "@/components/searchable-select";
@@ -41,7 +41,7 @@ function todayKolkata() {
 }
 
 function loadFlash() {
-  const raw = cookies().get("dropx_daily_submission_flash")?.value;
+  const raw = (cookies() as unknown as UnsafeUnwrappedCookies).get("dropx_daily_submission_flash")?.value;
   if (!raw) return { error: null as string | null, notice: null as string | null };
   try {
     const parsed = JSON.parse(raw) as { error?: unknown; notice?: unknown };
@@ -68,7 +68,8 @@ function checklistText(row: OpsDailySubmissionRow) {
 
 export const dynamic = "force-dynamic";
 
-export default async function DailySubmissionPage({ searchParams }: { searchParams?: SearchParams }) {
+export default async function DailySubmissionPage(props: { searchParams?: Promise<SearchParams> }) {
+  const searchParams = await props.searchParams;
   const authorization = await requirePagePermission("daily_submission", "access");
   const companyId = requireCompanyId(authorization);
   const permission = authorization.permissions.daily_submission;

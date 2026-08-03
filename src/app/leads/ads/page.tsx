@@ -1,4 +1,4 @@
-import { cookies } from "next/headers";
+import { cookies, type UnsafeUnwrappedCookies } from "next/headers";
 import { AppShell } from "@/components/app-shell";
 import { LeadsWorkspace } from "@/components/leads-workspace";
 import { requirePagePermission } from "@/lib/authorization";
@@ -9,7 +9,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 export const dynamic = "force-dynamic";
 
 function loadFlash() {
-  const store = cookies();
+  const store = (cookies() as unknown as UnsafeUnwrappedCookies);
   const raw = store.get("dropx_leads_flash")?.value;
   if (!raw) return { error: null as string | null, notice: null as string | null };
   try {

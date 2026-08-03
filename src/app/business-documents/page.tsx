@@ -1,4 +1,4 @@
-import { cookies } from "next/headers";
+import { cookies, type UnsafeUnwrappedCookies } from "next/headers";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import { PendingLink } from "@/components/pending-link";
@@ -64,7 +64,7 @@ type UserOption = {
 const pageSize = 20;
 
 function loadFlash() {
-  const raw = cookies().get("dropx_business_documents_flash")?.value;
+  const raw = (cookies() as unknown as UnsafeUnwrappedCookies).get("dropx_business_documents_flash")?.value;
   if (!raw) return { error: null as string | null, notice: null as string | null };
   try {
     const parsed = JSON.parse(raw) as { error?: unknown; notice?: unknown };
@@ -198,7 +198,7 @@ async function loadBusinessDocuments(companyId: string, authorization: Awaited<R
     const documentTypeId = String(row.document_type_id ?? "");
     const roleId = String(row.role_id ?? "");
     if (!documentTypeId || !roleId) return;
-    accessRolesByDocumentType.set(documentTypeId, [...accessRolesByDocumentType.get(documentTypeId) ?? [], roleId]);
+    accessRolesByDocumentType.set(documentTypeId, [...(accessRolesByDocumentType.get(documentTypeId) ?? []), roleId]);
   });
   const visibleRows = ((recordsResult.data ?? []) as unknown as Array<Omit<BusinessDocumentRow, "document_types"> & {
     document_types?: BusinessDocumentRow["document_types"] | BusinessDocumentRow["document_types"][];
@@ -252,7 +252,10 @@ async function loadBusinessDocuments(companyId: string, authorization: Awaited<R
 
 export const dynamic = "force-dynamic";
 
-export default async function BusinessDocumentsPage({ searchParams }: { searchParams?: { add?: string; edit?: string; q?: string; state?: string; location?: string; document?: string; provider?: string; model?: string; expiry?: string; page?: string } }) {
+export default async function BusinessDocumentsPage(
+  props: { searchParams?: Promise<{ add?: string; edit?: string; q?: string; state?: string; location?: string; document?: string; provider?: string; model?: string; expiry?: string; page?: string }> }
+) {
+  const searchParams = await props.searchParams;
   const authorization = await requirePagePermission("business_documents", "access");
   const companyId = requireCompanyId(authorization);
   const pagePermission = authorization.permissions.business_documents;
@@ -514,7 +517,7 @@ function documentStateCode(document: BusinessDocumentRow, locationById: Map<stri
 
 function documentLocationIds(document: BusinessDocumentRow) {
   if (document.scope_type !== "location") return [];
-  return [document.scope_id, ...document.additional_scope_ids ?? []].filter(Boolean) as string[];
+  return [document.scope_id, ...(document.additional_scope_ids ?? [])].filter(Boolean) as string[];
 }
 
 function documentMatchesProvider(document: BusinessDocumentRow, locationById: Map<string, OptionRow>, providerFilters: string[]) {

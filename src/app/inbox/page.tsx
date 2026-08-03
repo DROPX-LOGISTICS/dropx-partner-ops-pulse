@@ -91,11 +91,12 @@ async function loadInboxData(companyId: string, selectedConversationId?: string)
   };
 }
 
-export default async function InboxPage({
-  searchParams
-}: {
-  searchParams?: { conversation?: string };
-}) {
+export default async function InboxPage(
+  props: {
+    searchParams?: Promise<{ conversation?: string }>;
+  }
+) {
+  const searchParams = await props.searchParams;
   const authorization = await requirePagePermission("inbox", "access");
   const companyId = requireCompanyId(authorization);
   const data = await loadInboxData(companyId, searchParams?.conversation);

@@ -21,7 +21,7 @@ const processStages = [
 ];
 
 export default async function DashboardPage() {
-  const host = headers().get("x-forwarded-host")?.split(":")[0].toLowerCase() ?? headers().get("host")?.split(":")[0].toLowerCase() ?? "";
+  const host = (await headers()).get("x-forwarded-host")?.split(":")[0].toLowerCase() ?? (await headers()).get("host")?.split(":")[0].toLowerCase() ?? "";
   if (host === "admin-panel.dropxlogistics.com") redirect("/platform-admin");
   if (host === "connect.dropxlogistics.com") redirect("/connect");
   const authorization = await getAuthorization();

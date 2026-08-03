@@ -1,4 +1,4 @@
-import { cookies } from "next/headers";
+import { cookies, type UnsafeUnwrappedCookies } from "next/headers";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import { PendingLink } from "@/components/pending-link";
@@ -60,7 +60,7 @@ const settingCards: Array<{ type: SettingType; title: string; subtitle: string; 
 ];
 
 function loadFlash() {
-  const raw = cookies().get("dropx_id_generation_flash")?.value;
+  const raw = (cookies() as unknown as UnsafeUnwrappedCookies).get("dropx_id_generation_flash")?.value;
   if (!raw) return { error: null as string | null, notice: null as string | null };
   try {
     const parsed = JSON.parse(raw) as { error?: unknown; notice?: unknown };
@@ -112,7 +112,8 @@ function selectedSettingType(value?: string): SettingType {
 
 export const dynamic = "force-dynamic";
 
-export default async function DropxIdGenerationSettingsPage({ searchParams }: { searchParams?: { type?: string } }) {
+export default async function DropxIdGenerationSettingsPage(props: { searchParams?: Promise<{ type?: string }> }) {
+  const searchParams = await props.searchParams;
   const authorization = await requirePagePermission("app_settings", "access");
   const companyId = requireCompanyId(authorization);
   const permission = authorization.permissions.app_settings;

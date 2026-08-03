@@ -1,4 +1,4 @@
-import { cookies } from "next/headers";
+import { cookies, type UnsafeUnwrappedCookies } from "next/headers";
 import { AppShell } from "@/components/app-shell";
 import { EmailRecipientInput, type EmailRecipientOption } from "@/components/email-recipient-input";
 import { PageHead } from "@/components/page-head";
@@ -46,7 +46,7 @@ const recipientOptions = [
 ];
 
 function loadFlash() {
-  const raw = cookies().get("dropx_fleet_notification_templates_flash")?.value;
+  const raw = (cookies() as unknown as UnsafeUnwrappedCookies).get("dropx_fleet_notification_templates_flash")?.value;
   if (!raw) return { error: null as string | null, notice: null as string | null };
   try {
     const parsed = JSON.parse(raw) as { error?: unknown; notice?: unknown };

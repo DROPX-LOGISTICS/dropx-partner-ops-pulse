@@ -1,4 +1,4 @@
-import { cookies } from "next/headers";
+import { cookies, type UnsafeUnwrappedCookies } from "next/headers";
 import { AppShell } from "@/components/app-shell";
 import { CodSectionTabs } from "@/components/cod-section-tabs";
 import { PageHead } from "@/components/page-head";
@@ -38,7 +38,7 @@ function todayKolkata() {
 }
 
 function loadFlash() {
-  const raw = cookies().get("dropx_cod_portal_checks_flash")?.value;
+  const raw = (cookies() as unknown as UnsafeUnwrappedCookies).get("dropx_cod_portal_checks_flash")?.value;
   if (!raw) return { error: null as string | null, notice: null as string | null };
   try {
     const parsed = JSON.parse(raw) as { error?: unknown; notice?: unknown };
@@ -97,7 +97,8 @@ function portalRunStatusLabel(status: string, checkType: string) {
 
 export const dynamic = "force-dynamic";
 
-export default async function PortalChecksPage({ searchParams }: { searchParams?: SearchParams }) {
+export default async function PortalChecksPage(props: { searchParams?: Promise<SearchParams> }) {
+  const searchParams = await props.searchParams;
   const authorization = await requirePagePermission("cod_portal_checks", "access");
   const companyId = requireCompanyId(authorization);
   const permission = authorization.permissions.cod_portal_checks;

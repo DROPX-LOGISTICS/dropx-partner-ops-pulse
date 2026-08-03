@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { waitUntil } from "@vercel/functions";
+import { waitUntil } from "@/lib/wait-until";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { webhookCompanyId } from "@/lib/webhook-company";
 import { sendWorkforceApplicantWhatsApp } from "@/lib/workforce-applicant-whatsapp";

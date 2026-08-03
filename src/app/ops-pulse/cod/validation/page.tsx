@@ -1,4 +1,4 @@
-import { cookies } from "next/headers";
+import { cookies, type UnsafeUnwrappedCookies } from "next/headers";
 import { AppShell } from "@/components/app-shell";
 import { CodSectionTabs } from "@/components/cod-section-tabs";
 import { PageHead } from "@/components/page-head";
@@ -34,7 +34,7 @@ type SearchParams = {
 };
 
 function loadFlash() {
-  const raw = cookies().get("dropx_cod_validation_flash")?.value;
+  const raw = (cookies() as unknown as UnsafeUnwrappedCookies).get("dropx_cod_validation_flash")?.value;
   if (!raw) return { error: null as string | null, notice: null as string | null };
   try {
     const parsed = JSON.parse(raw) as { error?: unknown; notice?: unknown };
@@ -49,7 +49,8 @@ function loadFlash() {
 
 export const dynamic = "force-dynamic";
 
-export default async function CodValidationPage({ searchParams }: { searchParams?: SearchParams }) {
+export default async function CodValidationPage(props: { searchParams?: Promise<SearchParams> }) {
+  const searchParams = await props.searchParams;
   const authorization = await requirePagePermission("cod_validation", "access");
   const companyId = requireCompanyId(authorization);
   const permission = authorization.permissions.cod_validation;

@@ -4,7 +4,8 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(_: Request, { params }: { params: { id: string } }) {
+export async function GET(_: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const authorization = await getAuthorization();
   if (!authorization || !hasPermission(authorization, "cod_reports", "access")) {
     return NextResponse.json({ error: "Authentication required." }, { status: 401 });

@@ -47,7 +47,8 @@ function decisionClass(status: CapacityPlanningDecision["status"]) {
   return "no_data";
 }
 
-export default async function CapacityPage({ searchParams }: { searchParams?: SearchParams }) {
+export default async function CapacityPage(props: { searchParams?: Promise<SearchParams> }) {
+  const searchParams = await props.searchParams;
   const authorization = await requirePagePermission("cps_associates", "access");
   const companyId = requireCompanyId(authorization);
   const locationResult = await loadCodLocations(companyId, authorization.locationScopeIds, authorization.hasAllLocationAccess);

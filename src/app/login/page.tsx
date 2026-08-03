@@ -7,10 +7,11 @@ import { createServerSupabaseClient } from "@/lib/supabase-server";
 import { signInWithGoogle } from "./actions";
 
 type LoginPageProps = {
-  searchParams?: { error?: string; next?: string; reason?: string };
+  searchParams?: Promise<{ error?: string; next?: string; reason?: string }>;
 };
 
-export default async function LoginPage({ searchParams }: LoginPageProps) {
+export default async function LoginPage(props: LoginPageProps) {
+  const searchParams = await props.searchParams;
   const supabase = createServerSupabaseClient(undefined, true);
   const { data } = supabase
     ? await supabase.auth.getUser()

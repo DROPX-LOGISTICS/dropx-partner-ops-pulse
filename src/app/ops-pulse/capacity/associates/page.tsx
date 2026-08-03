@@ -26,7 +26,8 @@ function scopeCodes(value: string | undefined, allowed: string[]) {
   return allowed.filter((code) => requested.includes(code));
 }
 
-export default async function SprAssociatesPage({ searchParams }: { searchParams?: SearchParams }) {
+export default async function SprAssociatesPage(props: { searchParams?: Promise<SearchParams> }) {
+  const searchParams = await props.searchParams;
   const authorization = await requirePagePermission("cps_associates", "access");
   const companyId = requireCompanyId(authorization);
   const locationResult = await loadCodLocations(companyId, authorization.locationScopeIds, authorization.hasAllLocationAccess);

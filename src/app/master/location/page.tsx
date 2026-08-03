@@ -272,15 +272,16 @@ async function loadMasterData(companyId: string) {
 export const dynamic = "force-dynamic";
 
 type SettingsPageProps = {
-  searchParams?: {
+  searchParams?: Promise<{
     add?: string;
     edit?: string;
     locationError?: string;
     locationNotice?: string;
-  };
+  }>;
 };
 
-export default async function SettingsPage({ searchParams }: SettingsPageProps) {
+export default async function SettingsPage(props: SettingsPageProps) {
+  const searchParams = await props.searchParams;
   const authorization = await requirePagePermission("master_locations", "access");
   const companyId = requireCompanyId(authorization);
   const pagePermission = authorization.permissions.master_locations;

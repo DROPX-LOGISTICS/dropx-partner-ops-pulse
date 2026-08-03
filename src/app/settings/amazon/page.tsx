@@ -1,4 +1,4 @@
-import { cookies } from "next/headers";
+import { cookies, type UnsafeUnwrappedCookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
@@ -14,7 +14,7 @@ import { saveAmazonConnector, warmupAmazonPortalSession } from "./actions";
 export const dynamic = "force-dynamic";
 
 function parseFlash() {
-  const raw = cookies().get("dropx_amazon_connector_flash")?.value;
+  const raw = (cookies() as unknown as UnsafeUnwrappedCookies).get("dropx_amazon_connector_flash")?.value;
   if (!raw) return null;
   try {
     return JSON.parse(raw) as { error?: string; notice?: string };

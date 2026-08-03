@@ -8,7 +8,7 @@ import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { isSupabaseAdminConfigured, supabaseAdmin } from "@/lib/supabase-admin";
 import { createPaymentMethod, deletePaymentMethod, updatePaymentMethod } from "./actions";
-import { cookies } from "next/headers";
+import { cookies, type UnsafeUnwrappedCookies } from "next/headers";
 
 type PaymentComponentRow = {
   id: string;
@@ -84,7 +84,7 @@ async function loadPaymentMethods(companyId: string) {
 }
 
 function loadPaymentMethodFlash() {
-  const raw = cookies().get("dropx_payment_method_flash")?.value;
+  const raw = (cookies() as unknown as UnsafeUnwrappedCookies).get("dropx_payment_method_flash")?.value;
   if (!raw) return { error: null as string | null, notice: null as string | null };
   try {
     const parsed = JSON.parse(raw) as { error?: unknown; notice?: unknown };
@@ -99,7 +99,8 @@ function loadPaymentMethodFlash() {
 
 export const dynamic = "force-dynamic";
 
-export default async function PaymentMethodsPage({ searchParams }: { searchParams?: { edit?: string } }) {
+export default async function PaymentMethodsPage(props: { searchParams?: Promise<{ edit?: string }> }) {
+  const searchParams = await props.searchParams;
   const authorization = await requirePagePermission("payment_methods", "access");
   const companyId = requireCompanyId(authorization);
   const pagePermission = authorization.permissions.payment_methods;

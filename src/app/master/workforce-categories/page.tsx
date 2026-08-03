@@ -1,4 +1,4 @@
-import { cookies } from "next/headers";
+import { cookies, type UnsafeUnwrappedCookies } from "next/headers";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import { PendingLink } from "@/components/pending-link";
@@ -10,7 +10,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { createWorkforceCategory, updateWorkforceCategory } from "./actions";
 
 function loadFlash() {
-  const raw = cookies().get("dropx_workforce_category_flash")?.value;
+  const raw = (cookies() as unknown as UnsafeUnwrappedCookies).get("dropx_workforce_category_flash")?.value;
   if (!raw) return { error: null as string | null, notice: null as string | null };
   try {
     const parsed = JSON.parse(raw) as { error?: unknown; notice?: unknown };
@@ -25,11 +25,12 @@ function loadFlash() {
 
 export const dynamic = "force-dynamic";
 
-export default async function WorkforceCategoriesPage({
-  searchParams
-}: {
-  searchParams?: { add?: string; edit?: string; q?: string };
-}) {
+export default async function WorkforceCategoriesPage(
+  props: {
+    searchParams?: Promise<{ add?: string; edit?: string; q?: string }>;
+  }
+) {
+  const searchParams = await props.searchParams;
   const authorization = await requirePagePermission("designations", "access");
   const companyId = requireCompanyId(authorization);
   const permission = authorization.permissions.designations;

@@ -213,11 +213,12 @@ async function loadApprovals(companyId: string, authorization: AuthorizationCont
 
 export const dynamic = "force-dynamic";
 
-export default async function PaymentApprovalsPage({
-  searchParams
-}: {
-  searchParams?: { status?: string; search?: string; manage?: string; approvalError?: string; approvalNotice?: string };
-}) {
+export default async function PaymentApprovalsPage(
+  props: {
+    searchParams?: Promise<{ status?: string; search?: string; manage?: string; approvalError?: string; approvalNotice?: string }>;
+  }
+) {
+  const searchParams = await props.searchParams;
   const authorization = await requirePagePermission("payment_approvals", "access");
   const companyId = requireCompanyId(authorization);
   const pagePermission = authorization.permissions.payment_approvals;

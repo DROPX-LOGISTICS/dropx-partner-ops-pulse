@@ -114,7 +114,7 @@ function ok(data: Record<string, unknown>) {
 
 async function activeSession() {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
-  const token = cookies().get(connectSessionCookieName)?.value;
+  const token = (await cookies()).get(connectSessionCookieName)?.value;
   if (!token) throw new Error("Login required.");
   const sessionHash = createHash("sha256").update(token).digest("hex");
   const sessionResult = await supabaseAdmin

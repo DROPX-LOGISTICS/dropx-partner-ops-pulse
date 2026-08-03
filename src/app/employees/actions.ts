@@ -1,10 +1,10 @@
 "use server";
 
-import { cookies } from "next/headers";
+import { cookies, type UnsafeUnwrappedCookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import * as XLSX from "xlsx";
-import { waitUntil } from "@vercel/functions";
+import { waitUntil } from "@/lib/wait-until";
 import { requirePagePermission } from "@/lib/authorization";
 import { syncBiometricEnrolment } from "@/lib/biometric/enrolments";
 import { generateBiometricEnrolmentId } from "@/lib/biometric/ids";
@@ -30,7 +30,7 @@ function optional(value: FormDataEntryValue | null) {
 }
 
 function employeesRedirect(params: { edit?: string; error?: string; notice?: string }): never {
-  cookies().set("dropx_employees_flash", JSON.stringify(params), {
+  (cookies() as unknown as UnsafeUnwrappedCookies).set("dropx_employees_flash", JSON.stringify(params), {
     httpOnly: true,
     maxAge: 30,
     path: "/employees",
@@ -530,20 +530,20 @@ export async function bulkImportEmployees(formData: FormData) {
         throw new Error(`Row ${rowNumber}: You do not have access to location ${row.locationCode}.`);
       }
 
-      const employeeCode = row.dropxId || await generateConfiguredWorkerId({
+      const employeeCode = row.dropxId || (await generateConfiguredWorkerId({
         category: "employee",
         companyId,
         designationId,
         fallback: generatedEmployeeCode,
         locationId
-      });
-      const biometricId = row.biometricId || await generateConfiguredBiometricId({
+      }));
+      const biometricId = row.biometricId || (await generateConfiguredBiometricId({
         category: "employee",
         companyId,
         designationId,
         fallback: () => generateBiometricEnrolmentId(companyId),
         locationId
-      });
+      }));
 
       const insertResult = await supabaseAdmin.from("employees").insert(withCompany({
         employee_code: employeeCode,

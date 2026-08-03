@@ -1,6 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
-import { cookies } from "next/headers";
+import { cookies, type UnsafeUnwrappedCookies } from "next/headers";
 import { PendingLink } from "@/components/pending-link";
 import { StatusPill } from "@/components/status-pill";
 import { SubmitButton } from "@/components/submit-button";
@@ -43,7 +43,7 @@ type ControlUserRow = {
 };
 
 function loadFlash() {
-  const raw = cookies().get("dropx_platform_admin_flash")?.value;
+  const raw = (cookies() as unknown as UnsafeUnwrappedCookies).get("dropx_platform_admin_flash")?.value;
   if (!raw) return { error: null as string | null, notice: null as string | null };
   try {
     const parsed = JSON.parse(raw) as { error?: unknown; notice?: unknown };
@@ -272,11 +272,12 @@ function ControlUserForm({
 
 export const dynamic = "force-dynamic";
 
-export default async function PlatformAdminPage({
-  searchParams
-}: {
-  searchParams?: { add?: string; edit?: string; addUser?: string; editUser?: string; q?: string };
-}) {
+export default async function PlatformAdminPage(
+  props: {
+    searchParams?: Promise<{ add?: string; edit?: string; addUser?: string; editUser?: string; q?: string }>;
+  }
+) {
+  const searchParams = await props.searchParams;
   await requirePagePermission("company_master", "access");
   const { companies, moduleRows, controlUsers, error } = await loadPlatformData();
   const flash = loadFlash();

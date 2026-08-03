@@ -33,7 +33,8 @@ type SearchParams = {
 
 export const dynamic = "force-dynamic";
 
-export default async function CodReportsPage({ searchParams }: { searchParams?: SearchParams }) {
+export default async function CodReportsPage(props: { searchParams?: Promise<SearchParams> }) {
+  const searchParams = await props.searchParams;
   const authorization = await requirePagePermission("cod_reports", "access");
   const companyId = requireCompanyId(authorization);
   const [{ locations, error: locationsError }, submissionsResult] = await Promise.all([

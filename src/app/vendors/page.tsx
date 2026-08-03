@@ -1,22 +1,23 @@
 import { FieldExecutivePageContent } from "@/components/field-executive-page-content";
 
-export default function VendorsPage({
-  searchParams
-}: {
-  searchParams?: {
-    edit?: string;
-    error?: string;
-    notice?: string;
-    view?: string;
-    full_name?: string;
-    mobile_country_code?: string;
-    mobile?: string;
-    email?: string;
-    date_of_join?: string;
-    location_id?: string;
-    designation?: string;
-  };
-}) {
+export default async function VendorsPage(
+  props: {
+    searchParams?: Promise<{
+      edit?: string;
+      error?: string;
+      notice?: string;
+      view?: string;
+      full_name?: string;
+      mobile_country_code?: string;
+      mobile?: string;
+      email?: string;
+      date_of_join?: string;
+      location_id?: string;
+      designation?: string;
+    }>;
+  }
+) {
+  const searchParams = await props.searchParams;
   return (
     <FieldExecutivePageContent
       activeLabel="Vendors"

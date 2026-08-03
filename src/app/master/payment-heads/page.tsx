@@ -76,7 +76,10 @@ async function loadPaymentHeads(companyId: string) {
 
 export const dynamic = "force-dynamic";
 
-export default async function PaymentHeadsPage({ searchParams }: { searchParams?: { edit?: string; error?: string; saved?: string } }) {
+export default async function PaymentHeadsPage(
+  props: { searchParams?: Promise<{ edit?: string; error?: string; saved?: string }> }
+) {
+  const searchParams = await props.searchParams;
   const authorization = await requirePagePermission("master_payment_heads", "access");
   const companyId = requireCompanyId(authorization);
   const pagePermission = authorization.permissions.master_payment_heads;

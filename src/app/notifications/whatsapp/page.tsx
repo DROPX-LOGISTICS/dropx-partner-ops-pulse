@@ -1,4 +1,4 @@
-import { cookies } from "next/headers";
+import { cookies, type UnsafeUnwrappedCookies } from "next/headers";
 import { AppShell } from "@/components/app-shell";
 import { BulkWhatsAppPanel } from "@/components/bulk-whatsapp-panel";
 import { PageHead } from "@/components/page-head";
@@ -71,7 +71,7 @@ type WhatsAppProfileRow = {
 };
 
 function loadFlash() {
-  const raw = cookies().get("dropx_bulk_whatsapp_flash")?.value;
+  const raw = (cookies() as unknown as UnsafeUnwrappedCookies).get("dropx_bulk_whatsapp_flash")?.value;
   if (!raw) return { error: null as string | null, notice: null as string | null };
   try {
     const parsed = JSON.parse(raw) as { error?: unknown; notice?: unknown };

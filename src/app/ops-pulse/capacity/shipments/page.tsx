@@ -17,7 +17,8 @@ type Fact = {
 function validDate(value: unknown) { return /^\d{4}-\d{2}-\d{2}$/.test(String(value ?? "")); }
 function n(value: unknown) { const parsed = Number(value); return Number.isFinite(parsed) ? parsed : null; }
 
-export default async function CapacityShipmentEvidencePage({ searchParams }: { searchParams?: SearchParams }) {
+export default async function CapacityShipmentEvidencePage(props: { searchParams?: Promise<SearchParams> }) {
+  const searchParams = await props.searchParams;
   const authorization = await requirePagePermission("cps_associates", "access");
   const companyId = requireCompanyId(authorization);
   const locations = await loadCodLocations(companyId, authorization.locationScopeIds, authorization.hasAllLocationAccess);

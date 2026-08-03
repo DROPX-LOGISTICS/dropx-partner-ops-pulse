@@ -143,11 +143,12 @@ function isMissingAuditTable(message: string) {
 
 export const dynamic = "force-dynamic";
 
-export default async function VerificationApiReportPage({
-  searchParams = {}
-}: {
-  searchParams?: SearchParams;
-}) {
+export default async function VerificationApiReportPage(
+  props: {
+    searchParams?: Promise<SearchParams>;
+  }
+) {
+  const searchParams = (await props.searchParams) ?? {};
   const authorization = await requirePagePermission("verification_api_reports", "access");
   const companyId = requireCompanyId(authorization);
   const page = safePage(searchParams.page);

@@ -26,7 +26,8 @@ const workflows = {
   ]
 } as const;
 
-export default async function ClientOpsPage({ params }: { params: { client: string } }) {
+export default async function ClientOpsPage(props: { params: Promise<{ client: string }> }) {
+  const params = await props.params;
   const client = normalizeOpsClient(params.client);
   if (!client) notFound();
   const authorization = await requirePagePermission("ops_pulse", "access");

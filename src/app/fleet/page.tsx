@@ -44,7 +44,8 @@ async function loadFleetManager(companyId: string): Promise<FleetManager | null>
   };
 }
 
-export default async function FleetPage({ searchParams }: { searchParams?: { tab?: string } }) {
+export default async function FleetPage(props: { searchParams?: Promise<{ tab?: string }> }) {
+  const searchParams = await props.searchParams;
   const authorization = await getAuthorization();
   const fleetManager = authorization ? await loadFleetManager(requireCompanyId(authorization)) : null;
   const legacyFleetPermission = authorization

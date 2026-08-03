@@ -1,6 +1,6 @@
 "use server";
 
-import { cookies } from "next/headers";
+import { cookies, type UnsafeUnwrappedCookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requirePagePermission } from "@/lib/authorization";
@@ -25,7 +25,7 @@ function required(value: FormDataEntryValue | null, field: string) {
 }
 
 function flash(params: { error?: string; notice?: string }, type: SettingType = "dropx_id"): never {
-  cookies().set("dropx_id_generation_flash", JSON.stringify(params), {
+  (cookies() as unknown as UnsafeUnwrappedCookies).set("dropx_id_generation_flash", JSON.stringify(params), {
     httpOnly: true,
     maxAge: 30,
     path: "/settings/dropx-id-generation",

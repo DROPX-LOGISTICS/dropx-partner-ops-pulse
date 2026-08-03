@@ -38,13 +38,14 @@ async function loadProviders(companyId: string) {
 export const dynamic = "force-dynamic";
 
 type ProvidersPageProps = {
-  searchParams?: {
+  searchParams?: Promise<{
     add?: string;
     edit?: string;
-  };
+  }>;
 };
 
-export default async function ProvidersPage({ searchParams }: ProvidersPageProps) {
+export default async function ProvidersPage(props: ProvidersPageProps) {
+  const searchParams = await props.searchParams;
   const authorization = await requirePagePermission("master_providers", "access");
   const companyId = requireCompanyId(authorization);
   const pagePermission = authorization.permissions.master_providers;

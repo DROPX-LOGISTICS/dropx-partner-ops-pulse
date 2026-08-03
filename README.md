@@ -33,8 +33,23 @@ For Google sign-in locally, add these to the Supabase Auth redirect allowlist:
 - Shared Ops surfaces: CPS, masters, users, fleet, payment request/approval paths
 - Auth, shell, and middleware forced to Ops mode
 
+## Deploy to Cloudflare (via GitHub)
+
+Production deploy is intended through **Cloudflare Workers Builds** connected to GitHub (any Cloudflare account).
+
+1. Push this repo to GitHub.
+2. In Cloudflare: **Workers & Pages → Create → Import repository**.
+3. Build command: `npm run deploy`
+4. Set vars/secrets in the Worker settings (see docs).
+
+Full steps: [docs/CLOUDFLARE_GITHUB_DEPLOY.md](docs/CLOUDFLARE_GITHUB_DEPLOY.md)  
+Secrets checklist: [docs/CLOUDFLARE_SECRETS.md](docs/CLOUDFLARE_SECRETS.md)
+
+Requires **Workers Paid** (worker bundle exceeds the free 3 MiB limit).
+
 ## Notes
 
 - Port **3001** so it can run next to the partner dashboard on 3000.
 - Source was copied from `dropx-partner-dashboard`; keep them in sync manually if you need production parity.
 - `apps/connect` and `workers` were not copied (not required for Ops Pulse).
+- Email on Cloudflare uses `EMAIL_API_KEY` (Resend-compatible HTTP), not SMTP.

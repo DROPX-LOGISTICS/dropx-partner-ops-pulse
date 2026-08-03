@@ -122,7 +122,8 @@ async function loadPreview(companyId: string, selectedRoleId?: string) {
 
 export const dynamic = "force-dynamic";
 
-export default async function DeveloperPage({ searchParams }: { searchParams?: SearchParams }) {
+export default async function DeveloperPage(props: { searchParams?: Promise<SearchParams> }) {
+  const searchParams = await props.searchParams;
   const authorization = await requirePagePermission("developer_mode", "access");
   const companyId = requireCompanyId(authorization);
   const preview = await loadPreview(companyId, searchParams?.role);

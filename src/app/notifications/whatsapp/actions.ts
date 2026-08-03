@@ -1,6 +1,6 @@
 "use server";
 
-import { cookies } from "next/headers";
+import { cookies, type UnsafeUnwrappedCookies } from "next/headers";
 import { redirect } from "next/navigation";
 import * as XLSX from "xlsx";
 import { requirePagePermission } from "@/lib/authorization";
@@ -32,7 +32,7 @@ function clean(value: unknown) {
 }
 
 function flashRedirect(params: { error?: string; notice?: string }): never {
-  cookies().set("dropx_bulk_whatsapp_flash", JSON.stringify(params), {
+  (cookies() as unknown as UnsafeUnwrappedCookies).set("dropx_bulk_whatsapp_flash", JSON.stringify(params), {
     httpOnly: true,
     maxAge: 30,
     path: "/notifications/whatsapp",

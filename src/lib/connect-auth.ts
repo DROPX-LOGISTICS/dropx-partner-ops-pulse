@@ -193,7 +193,7 @@ export async function createConnectSession({
     user_agent: request.headers.get("user-agent")
   });
   if (insertResult.error) throw new Error(insertResult.error.message);
-  cookies().set(connectSessionCookieName, token, {
+  (await cookies()).set(connectSessionCookieName, token, {
     httpOnly: true,
     sameSite: "lax",
     secure: true,
