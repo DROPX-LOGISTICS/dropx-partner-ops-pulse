@@ -27,19 +27,42 @@ Use the repo URL Cloudflare will ask for (e.g. `https://github.com/org/dropx-ops
 1. Open [Cloudflare Dashboard](https://dash.cloudflare.com) → **Workers & Pages** → **Create**.
 2. Choose **Import a repository** / **Workers Builds** (Git).
 3. Authorize GitHub and select this repository + branch (usually `main`).
-4. Configure build (Workers Builds):
+4. Configure build (Workers Builds) — see also root [`CLOUDFLARE.md`](../CLOUDFLARE.md):
 
 | Setting | Value |
 |--------|--------|
-| **Build command** | `npx opennextjs-cloudflare build` |
-| **Deploy command** | `npx opennextjs-cloudflare deploy` |
+| **Build command** | `npm run cf:build` |
+| **Deploy command** | `npx wrangler deploy` |
 | **Root directory** | `/` (repo root) |
 | **Node version** | `20` or `22` |
 
-If the UI only has a single command field, use: `npm run deploy`  
-(`npm run deploy` = build + deploy in one step.)
+Do **not** use Build = `npm run build` with Deploy = `npx wrangler deploy` — that skips OpenNext and fails with “Could not find compiled Open Next config”.
 
-5. Worker name should match [`wrangler.jsonc`](../wrangler.jsonc): **`dropx-ops-pulse`** (or change both together).
+Alternative: Build empty, Deploy = `npm run deploy`.
+
+5. Worker name should match [`wrangler.jsonc`](../wrangler.jsonc): **`dropx-partner-ops-pulse`**.
+
+### Wrong project type / wrong build command (common failure)
+
+If the build log shows:
+
+- `Did you mean to use wrangler.toml to configure Pages?` / `pages_build_output_dir`
+- `Executing user command: npx @cloudflare/next-on-pages@1`
+
+you created a **Pages** project (or left the Pages default build command). This app uses **OpenNext → Workers**, not `@cloudflare/next-on-pages`.
+
+**Fix:**
+
+1. Prefer: delete the Pages project and create a **Worker** with Git (Workers Builds).
+2. Or edit the existing project’s build settings and replace the command:
+
+| Wrong (Pages default) | Correct (this repo) |
+|------------------------|---------------------|
+| `npx @cloudflare/next-on-pages@1` | Build: `npx opennextjs-cloudflare build` |
+| | Deploy: `npx opennextjs-cloudflare deploy` |
+| | Or single: `npm run deploy` |
+
+Do **not** install or run `@cloudflare/next-on-pages` for this repo.
 
 ## 3. Environment variables & secrets
 

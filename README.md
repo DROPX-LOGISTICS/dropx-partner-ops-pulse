@@ -35,15 +35,9 @@ For Google sign-in locally, add these to the Supabase Auth redirect allowlist:
 
 ## Deploy to Cloudflare (via GitHub)
 
-Production deploy is intended through **Cloudflare Workers Builds** connected to GitHub (any Cloudflare account).
+See **[CLOUDFLARE.md](CLOUDFLARE.md)** for the exact Workers Builds commands and env vars.
 
-1. Push this repo to GitHub.
-2. In Cloudflare: **Workers & Pages → Create → Import repository**.
-3. Build command: `npm run deploy`
-4. Set vars/secrets in the Worker settings (see docs).
-
-Full steps: [docs/CLOUDFLARE_GITHUB_DEPLOY.md](docs/CLOUDFLARE_GITHUB_DEPLOY.md)  
-Secrets checklist: [docs/CLOUDFLARE_SECRETS.md](docs/CLOUDFLARE_SECRETS.md)
+Production is **Workers + OpenNext**, not Pages / `next-on-pages`.
 
 Requires **Workers Paid** (worker bundle exceeds the free 3 MiB limit).
 
