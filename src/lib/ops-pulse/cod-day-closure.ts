@@ -174,6 +174,7 @@ export async function notifyCodManager({
   ].map((email) => String(email ?? "").trim().toLowerCase()).filter(Boolean);
   const recipients = [...new Set(emails)];
   const notification = await supabaseAdmin.from("cod_manager_notifications").insert({
+    id: crypto.randomUUID(),
     company_id: companyId,
     closure_id: closureId,
     location_id: locationId,
@@ -181,7 +182,8 @@ export async function notifyCodManager({
     notification_type: notificationType,
     title,
     message,
-    email_status: recipients.length ? "Pending" : "Skipped"
+    email_status: recipients.length ? "Pending" : "Skipped",
+    created_at: new Date().toISOString()
   }).select("id").single();
   if (notification.error) throw new Error(notification.error.message);
 

@@ -10590,6 +10590,55 @@ tbody tr:hover td {
   margin-top: 6px;
 }
 
+.expected-edit-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.expected-edit-row .field {
+  flex: 1;
+}
+
+.expected-edit-button {
+  min-width: 36px;
+  height: 36px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.cash-pending-lock {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  margin-top: 10px;
+  padding: 12px 14px;
+  border: 1px solid #f6d0a8;
+  border-radius: 10px;
+  background: #fff8ef;
+  color: #9a6700;
+}
+
+.cash-pending-lock strong {
+  color: #7a4d00;
+}
+
+.cash-pending-lock span {
+  flex: 1 1 220px;
+  font-size: 12px;
+}
+
+.cash-recon-modal .panel-head {
+  align-items: flex-start;
+}
+
+.required-mark {
+  color: #b42318;
+}
+
 .cash-breakdown-grid .cash-remarks {
   grid-column: 1 / -1;
 }

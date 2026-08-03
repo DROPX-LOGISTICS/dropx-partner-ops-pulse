@@ -2,7 +2,6 @@ import { cookies } from "next/headers";
 import { AppShell } from "@/components/app-shell";
 import { CodSectionTabs } from "@/components/cod-section-tabs";
 import { PageHead } from "@/components/page-head";
-import { SearchableSelect } from "@/components/searchable-select";
 import { StatusPill } from "@/components/status-pill";
 import { SubmitButton } from "@/components/submit-button";
 import { requirePagePermission } from "@/lib/authorization";
@@ -22,24 +21,35 @@ import {
 } from "@/lib/ops-pulse/cod";
 import { isSupabaseAdminConfigured } from "@/lib/supabase-admin";
 import {
-  addManualExecutiveReconciliation,
   continueCodWithPendingDriverReconciliation,
   deleteExecutiveReconciliation,
   queueCodClosureCheck,
   requestCodGateException,
   reviewCodGateException,
-  refreshExecutiveReconciliationRoster,
   saveExecutiveReconciliation,
   submitCodCashCollection,
   submitCodDayClosure
 } from "./actions";
 import { LiveCacheRefresh } from "./live-cache-refresh";
-import { AssociateEntryBuilder } from "./associate-entry-builder";
 import { loadCodDayClosures, loadCodManagerNotifications } from "@/lib/ops-pulse/cod-day-closure";
 import { canAccessCodAudit, loadCodAuditRows } from "@/lib/ops-pulse/cod-audit";
 import { PortalCheckProgress } from "./portal-check-progress";
 import { resolveOperatingContext } from "@/lib/ops-pulse/operating-context";
+import { expectedFromCashReconRaw, type CashReconAssociate } from "@/lib/ops-pulse/cash-recon-types";
 import { CashSubmissionButton } from "./cash-submission-button";
+import { CashCollectionWorkspace } from "./cash-collection-workspace";
+import {
+  CashStepGateProvider,
+  ContinueToDriverValidation,
+  DriverValidationNavLink
+} from "./cash-step-gate";
+
+function isCashReconWorkerConfigured() {
+  return Boolean(
+    (process.env.CASH_RECON_WORKER_URL || process.env.NEXT_PUBLIC_CASH_RECON_WORKER_URL || "").trim()
+    && (process.env.CASH_RECON_ADMIN_KEY || process.env.X_ADMIN_KEY || "").trim()
+  );
+}
 
 export const maxDuration = 300;
 
@@ -223,24 +233,41 @@ export default async function ExecutiveReconciliationPage({ searchParams }: { se
   });
   const resultSetupError = result.error && isMissingCodSetup({ message: result.error }) ? result.error : null;
   const setupError = resultSetupError;
-  const stationOptions = result.locations.map((location) => ({
-    helper: [location.state, location.station_name].filter(Boolean).join(" / "),
-    label: locationLabel(location),
-    value: location.id
-  }));
   const selectedStation = result.locations.find((location) => location.id === defaultLocationId);
   const rows = defaultLocationId
     ? result.rows.filter((row) => row.location_id === defaultLocationId || row.station_code === selectedStation?.station_code)
     : result.rows;
   const savedRows = rows.filter((row) => row.reconciliation_id);
-  const availableRows = rows.filter((row) => row.source_associate_name && !row.reconciliation_id);
+  // Collect cash = shipment DB associates only (full names like "Shiva Yadav / DROP / 207546749").
+  // Never use cash-recon roster rows here — those belong in Missing from DER when unmatched.
+  const availableRows = rows.filter((row) =>
+    row.source === "shipment_data"
+    && row.source_associate_name
+    && !row.reconciliation_id
+  );
+  const dbAssociates = availableRows.map((row) => ({
+    name: String(row.source_associate_name ?? "").trim(),
+    providerEmployeeId: String(row.provider_employee_id ?? "").trim(),
+    shipmentType: row.shipment_type ?? "Shipment data",
+    pendingAmount: 0,
+    expectedAmount: 0,
+    pendingRecon: 0,
+    breakdown: [] as Array<{
+      trackingId: string;
+      paymentMethod: string;
+      moneyCollectionTime: number | null;
+      amount: number;
+      stationTimeZone: string;
+    }>
+  })).filter((row) => row.providerEmployeeId && row.name);
   const completed = savedRows.filter((row) => row.reconciliation_status === "Completed").length;
   const expectedTotal = savedRows.reduce((sum, row) => sum + amountValue(row.expected_amount), 0);
   const collectedTotal = savedRows.reduce((sum, row) => sum + amountValue(row.collected_amount), 0);
   const netDifference = savedRows.reduce((sum, row) => sum + amountValue(row.difference_amount), 0);
   const hasSingleStationScope = result.locations.length <= 1;
   const sccRows = rows.filter((row) => row.source === "scc_driver_reconciliation").length;
-  const workerReady = Boolean(process.env.OPS_PORTAL_WORKER_URL?.trim() && process.env.OPS_PORTAL_WORKER_SECRET?.trim());
+  const cashReconReady = isCashReconWorkerConfigured();
+  const automationReady = cashReconReady && isSupabaseAdminConfigured;
   const auditAllowed = canAccessCodAudit(authorization);
   const [closures, managerNotifications, auditRows, portalRunsResult] = await Promise.all([
     loadCodDayClosures(companyId, result.businessDate, result.locations.map((location) => location.id)),
@@ -302,7 +329,37 @@ export default async function ExecutiveReconciliationPage({ searchParams }: { se
     : selectedClosure?.deposit_check_status ?? "Locked";
   const canManagerReview = auditAllowed;
   const requestedStep = ["1", "2", "3"].includes(String(searchParams?.step)) ? Number(searchParams?.step) : 1;
-  const cashReady = savedRows.length > 0;
+  const savedProviderEmployeeIds = savedRows
+    .map((row) => String(row.provider_employee_id ?? "").trim())
+    .filter(Boolean);
+  const savedIdSet = new Set(savedProviderEmployeeIds.map((id) => id.toUpperCase()));
+  const rosterSynced = rows.some((row) => {
+    const raw = row.scc_raw_row as Record<string, unknown> | null;
+    return raw?.source === "cash_recon_worker";
+  });
+  const requiredFromRoster = rows.filter((row) => {
+    const id = String(row.provider_employee_id ?? "").trim();
+    if (!id || id === "__other__") return false;
+    const raw = row.scc_raw_row as Record<string, unknown> | null;
+    if (raw?.source !== "cash_recon_worker") return false;
+    return expectedFromCashReconRaw(raw) > 0.01;
+  });
+  const initialRequiredAssociates: CashReconAssociate[] = requiredFromRoster.map((row) => ({
+    providerEmployeeId: String(row.provider_employee_id ?? "").trim(),
+    name: String(row.source_associate_name ?? "").trim() || executiveDisplayName(row),
+    displayName: String(row.source_associate_name ?? "").trim() || executiveDisplayName(row),
+    employeeId: null,
+    expected: expectedFromCashReconRaw(row.scc_raw_row as Record<string, unknown> | null),
+    pendingRecon: amountValue(row.scc_pending_amount ?? row.pending_amount),
+    breakdown: [],
+    source: "matched",
+    shipmentType: "Shipment data"
+  }));
+  const cashReady = cashReconReady
+    ? rosterSynced
+      && requiredFromRoster.length > 0
+      && requiredFromRoster.every((row) => savedIdSet.has(String(row.provider_employee_id).trim().toUpperCase()))
+    : savedRows.length > 0;
   const activeStep = requestedStep >= 3 && !driverCleared
     ? cashReady ? 2 : 1
     : requestedStep >= 2 && !cashReady
@@ -320,7 +377,7 @@ export default async function ExecutiveReconciliationPage({ searchParams }: { se
         eyebrow="Ops Pulse"
         title="Executive Reconciliation"
         subtitle="Count cash, validate SCC and close the station day."
-        action={<span className={`status-pill ${workerReady && isSupabaseAdminConfigured ? "good" : "warn"}`}>{workerReady && isSupabaseAdminConfigured ? "Automation ready" : "Setup required"}</span>}
+        action={<span className={`status-pill ${automationReady ? "good" : "warn"}`}>{automationReady ? "Automation ready" : "Setup required"}</span>}
       />
       <CodSectionTabs active="executive-reconciliation" />
 
@@ -348,7 +405,16 @@ export default async function ExecutiveReconciliationPage({ searchParams }: { se
       ) : null}
 
       {!setupError ? (
-        <>
+        <CashStepGateProvider
+          initialRequired={initialRequiredAssociates}
+          mode={cashReconReady ? "cash-recon" : "legacy"}
+          savedCount={savedRows.length}
+          savedEntries={savedRows.map((row) => ({
+            providerEmployeeId: String(row.provider_employee_id ?? "").trim(),
+            name: executiveDisplayName(row)
+          }))}
+          step2Href={stepHref(2)}
+        >
           <LiveCacheRefresh active={hasActivePortalCheck} />
           <section className="panel reconciliation-control-bar">
             <div className="panel-body">
@@ -379,40 +445,37 @@ export default async function ExecutiveReconciliationPage({ searchParams }: { se
             <a className={`${activeStep === 1 ? "current" : ""} ${cashReady ? "complete" : ""}`} href={stepHref(1)}>
               <i>1</i><span><strong>Cash sheet</strong><small>Select drivers and count cash</small></span>
             </a>
-            <a className={`${activeStep === 2 ? "current" : ""} ${driverCleared ? "complete" : ""} ${!cashReady ? "locked" : ""}`} href={cashReady ? stepHref(2) : stepHref(1)} aria-disabled={!cashReady}>
+            <DriverValidationNavLink
+              className={`${activeStep === 2 ? "current" : ""} ${driverCleared ? "complete" : ""}`}
+              href={stepHref(2)}
+              lockedHref={stepHref(1)}
+            >
               <i>2</i><span><strong>Driver validation</strong><small>Submit COD and check SCC</small></span>
-            </a>
+            </DriverValidationNavLink>
             <a className={`${activeStep === 3 ? "current" : ""} ${selectedClosure?.is_final_submitted ? "complete" : ""} ${!driverCleared ? "locked" : ""}`} href={driverCleared ? stepHref(3) : stepHref(cashReady ? 2 : 1)} aria-disabled={!driverCleared}>
               <i>3</i><span><strong>Deposit & summary</strong><small>Match bank deposit and close</small></span>
             </a>
           </nav>
 
-          {activeStep === 1 ? (
+          {activeStep === 1 && defaultLocationId && selectedStation ? (
+            <CashCollectionWorkspace
+              dbAssociates={dbAssociates}
+              businessDate={result.businessDate}
+              canAdd={permission.canAdd}
+              canEdit={permission.canEdit && !selectedClosure?.is_final_submitted}
+              locationId={defaultLocationId}
+              returnHref={returnHref}
+              savedCount={savedRows.length}
+              stationCode={selectedStation.station_code}
+              stationLabel={selectedStation.station_name ?? selectedStation.state ?? ""}
+              workerConfigured={cashReconReady}
+            />
+          ) : activeStep === 1 ? (
             <section className="panel reconciliation-stage">
               <div className="panel-head">
-                <div><span className="stage-kicker">Step 1 of 3</span><h2>Associate cash sheet</h2><p className="subtle">Select one driver or add all available drivers, then enter the expected COD and denomination count.</p></div>
-                <StatusPill status={rows.length ? `${availableRows.length} available` : "Driver sync required"} />
+                <div><span className="stage-kicker">Step 1 of 3</span><h2>Associate cash sheet</h2><p className="subtle">Select one station to load drivers from the cash recon worker.</p></div>
               </div>
-              <div className="panel-body reconciliation-cash-source">
-                <div className="reconciliation-stage-action">
-                  <div><strong>{selectedStation ? `${selectedStation.station_code} · ${result.businessDate}` : "Select a station"}</strong><span>{rows.length ? `${rows.length} drivers loaded · ${savedRows.length} cash rows saved` : "Load SCC drivers before adding cash rows."}</span></div>
-                  {defaultLocationId ? (
-                    <form action={refreshExecutiveReconciliationRoster}>
-                      <input type="hidden" name="return_href" value={stepHref(1)} />
-                      <input type="hidden" name="business_date" value={result.businessDate} />
-                      <input type="hidden" name="location_id" value={defaultLocationId} />
-                      <SubmitButton className="button secondary" disabled={!permission.canEdit || Boolean(selectedClosure?.is_final_submitted) || !workerReady}>
-                        {rows.length ? "Refresh drivers" : "Load drivers"}
-                      </SubmitButton>
-                    </form>
-                  ) : null}
-                </div>
-                {!workerReady ? (
-                  <p className="subtle" style={{ marginTop: 12 }}>
-                    Automatic driver sync needs <code>OPS_PORTAL_WORKER_URL</code> and <code>OPS_PORTAL_WORKER_SECRET</code> in <code>.env.local</code>.
-                  </p>
-                ) : null}
-              </div>
+              <div className="panel-body"><p className="subtle">Select one station to load its Amazon associates.</p></div>
             </section>
           ) : null}
 
@@ -463,8 +526,11 @@ export default async function ExecutiveReconciliationPage({ searchParams }: { se
                       <input type="hidden" name="location_id" value={defaultLocationId} />
                       <CashSubmissionButton
                         disabled={!permission.canEdit || !savedRows.length || Boolean(selectedClosure?.is_final_submitted)}
+                        stationCode={selectedStation?.station_code ?? ""}
+                        businessDate={result.businessDate}
                         varianceLabel={currentVarianceLabel}
                         varianceType={currentVarianceType}
+                        workerConfigured={cashReconReady}
                       />
                     </form>
                   </section>
@@ -631,35 +697,6 @@ export default async function ExecutiveReconciliationPage({ searchParams }: { se
           <section className={`panel ${activeStep !== 1 ? "reconciliation-step-hidden" : ""}`}>
             <div className="panel-head">
               <div>
-                <h2>Collect cash</h2>
-                <p className="subtle">Select associate, count denominations and save.</p>
-              </div>
-              <span className="count-badge">{availableRows.length} available</span>
-            </div>
-            {defaultLocationId && selectedStation ? (
-              <AssociateEntryBuilder
-                associates={availableRows
-                  .map((row) => ({
-                    name: row.source_associate_name ?? "",
-                    providerEmployeeId: row.provider_employee_id,
-                    shipmentType: row.shipment_type ?? "SCC Driver Reconciliation",
-                    pendingAmount: amountValue(row.pending_amount)
-                  }))}
-                businessDate={result.businessDate}
-                canEdit={permission.canEdit && !selectedClosure?.is_final_submitted}
-                locationId={defaultLocationId}
-                returnHref={returnHref}
-                stationCode={selectedStation.station_code}
-                stationLabel={selectedStation.station_name ?? selectedStation.state ?? ""}
-              />
-            ) : (
-              <div className="panel-body"><p className="subtle">Select one station to load its Amazon associates.</p></div>
-            )}
-          </section>
-
-          <section className={`panel ${activeStep !== 1 ? "reconciliation-step-hidden" : ""}`}>
-            <div className="panel-head">
-              <div>
                 <h2>Saved cash</h2>
                 <p className="subtle">Edit or delete before final close.</p>
               </div>
@@ -737,7 +774,7 @@ export default async function ExecutiveReconciliationPage({ searchParams }: { se
                 <div className="panel-body"><p className="subtle">No saved cash entries.</p></div>
               )}
             </div>
-            {savedRows.length ? <div className="reconciliation-stage-footer"><span>Review differences before submitting COD.</span><a className="button" href={stepHref(2)}>Continue to driver validation →</a></div> : null}
+            {activeStep === 1 ? <ContinueToDriverValidation /> : null}
           </section>
 
           {activeStep === 3 && auditAllowed ? (
@@ -768,32 +805,7 @@ export default async function ExecutiveReconciliationPage({ searchParams }: { se
               </div>
             </details>
           ) : null}
-
-          {activeStep === 1 && permission.canAdd ? (
-            <details className="panel reconciliation-support-panel">
-              <summary>Add associate missing from DER</summary>
-              <div className="panel-body">
-                <form action={addManualExecutiveReconciliation} className="form-grid cod-manual-reconciliation-grid">
-                  <input type="hidden" name="return_href" value={returnHref} />
-                  <input type="hidden" name="provider_employee_id" value="__manual__" />
-                  <label>Business Date<input className="field" name="business_date" type="date" defaultValue={result.businessDate} required /></label>
-                  <label className="span-2">Station<SearchableSelect name="location_id" options={stationOptions} defaultValue={defaultLocationId} placeholder="Select station" required disabled={hasSingleStationScope} /></label>
-                  {hasSingleStationScope ? <input type="hidden" name="location_id" value={defaultLocationId} /> : null}
-                  <label>Associate Name<input className="field" name="manual_associate_name" placeholder="Missing associate name" required /></label>
-                  <label>Expected COD<input className="field" name="expected_amount" inputMode="decimal" placeholder="0" /></label>
-                  {denominations.map(([name, label]) => (
-                    <label key={`manual-${name}`}>{label}<input className="field" name={name} inputMode="numeric" placeholder="0" /></label>
-                  ))}
-                  <label>Other / coins<input className="field" name="cash_other_amount" inputMode="decimal" placeholder="0" /></label>
-                  <label className="span-3">Remarks<input className="field" name="remarks" placeholder="Why this associate was added manually" /></label>
-                  <div className="form-actions span-4 align-right">
-                    <SubmitButton>Add and calculate</SubmitButton>
-                  </div>
-                </form>
-              </div>
-            </details>
-          ) : null}
-        </>
+        </CashStepGateProvider>
       ) : null}
     </AppShell>
   );

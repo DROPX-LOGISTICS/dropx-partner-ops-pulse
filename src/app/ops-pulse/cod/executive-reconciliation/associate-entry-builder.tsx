@@ -3,20 +3,32 @@
 import { useMemo, useState } from "react";
 import { SearchableSelect } from "@/components/searchable-select";
 import { SubmitButton } from "@/components/submit-button";
-import { saveExecutiveReconciliation } from "./actions";
+import type { CashReconPendingBreakdown } from "@/lib/ops-pulse/cash-recon-types";
+import { saveExecutiveReconciliation } from "./cash-entry-actions";
+import { PendingReconModal } from "./pending-recon-modal";
 
-type AssociateOption = {
+/** Same shape as production Collect cash — names come from DB (shipment roster). */
+export type AssociateOption = {
   name: string;
   providerEmployeeId: string;
   shipmentType: string;
+  /** Prefill for Expected COD — from cash-recon paymentInfo.expected when matched. */
   pendingAmount: number;
+  expectedAmount: number;
+  pendingRecon: number;
+  breakdown: CashReconPendingBreakdown[];
 };
 
 type EntryRow = {
   key: number;
   providerEmployeeId: string;
+  manualAssociateName: string;
   expectedAmount: string;
+  expectedOriginal: string;
   cashOtherAmount: string;
+  remarks: string;
+  pendingOverrideRemarks: string;
+  denominationUnlocked: boolean;
   denominationCounts: Record<DenominationName, string>;
 };
 
@@ -51,6 +63,11 @@ function currency(value: number) {
   return value.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+function expectedPrefill(associate: AssociateOption | undefined) {
+  const value = Number(associate?.expectedAmount ?? associate?.pendingAmount ?? 0);
+  return value > 0 ? String(value) : "";
+}
+
 export function AssociateEntryBuilder({
   associates,
   businessDate,
@@ -58,7 +75,8 @@ export function AssociateEntryBuilder({
   locationId,
   returnHref,
   stationCode,
-  stationLabel
+  stationLabel,
+  emptyHint
 }: {
   associates: AssociateOption[];
   businessDate: string;
@@ -67,14 +85,21 @@ export function AssociateEntryBuilder({
   returnHref: string;
   stationCode: string;
   stationLabel: string;
+  emptyHint?: string;
 }) {
   const [rows, setRows] = useState<EntryRow[]>([{
     key: 1,
     providerEmployeeId: "",
+    manualAssociateName: "",
     expectedAmount: "",
+    expectedOriginal: "",
     cashOtherAmount: "",
+    remarks: "",
+    pendingOverrideRemarks: "",
+    denominationUnlocked: true,
     denominationCounts: emptyDenominations()
   }]);
+  const [pendingModalKey, setPendingModalKey] = useState<number | null>(null);
   const optionMap = useMemo(
     () => new Map(associates.map((associate) => [associate.providerEmployeeId, associate])),
     [associates]
@@ -86,21 +111,34 @@ export function AssociateEntryBuilder({
       {
         key: Math.max(0, ...current.map((row) => row.key)) + 1,
         providerEmployeeId: "",
+        manualAssociateName: "",
         expectedAmount: "",
+        expectedOriginal: "",
         cashOtherAmount: "",
+        remarks: "",
+        pendingOverrideRemarks: "",
+        denominationUnlocked: true,
         denominationCounts: emptyDenominations()
       }
     ]);
   }
 
   function addAllDrivers() {
-    setRows(associates.map((associate, index) => ({
-      key: index + 1,
-      providerEmployeeId: associate.providerEmployeeId,
-      expectedAmount: Number(associate.pendingAmount) > 0 ? String(associate.pendingAmount) : "",
-      cashOtherAmount: "",
-      denominationCounts: emptyDenominations()
-    })));
+    setRows(associates.filter((row) => row.providerEmployeeId !== "__other__").map((associate, index) => {
+      const pending = Number(associate.pendingRecon) > 0.01;
+      return {
+        key: index + 1,
+        providerEmployeeId: associate.providerEmployeeId,
+        manualAssociateName: "",
+        expectedAmount: expectedPrefill(associate),
+        expectedOriginal: String(associate.expectedAmount ?? associate.pendingAmount ?? 0),
+        cashOtherAmount: "",
+        remarks: "",
+        pendingOverrideRemarks: "",
+        denominationUnlocked: !pending,
+        denominationCounts: emptyDenominations()
+      };
+    }));
   }
 
   function removeRow(key: number) {
@@ -109,11 +147,21 @@ export function AssociateEntryBuilder({
 
   function selectAssociate(key: number, providerEmployeeId: string) {
     const associate = optionMap.get(providerEmployeeId);
+    const pending = Number(associate?.pendingRecon ?? 0) > 0.01;
+    const isOther = providerEmployeeId === "__other__";
     setRows((current) => current.map((row) => row.key === key ? {
       ...row,
       providerEmployeeId,
-      expectedAmount: associate && Number(associate.pendingAmount) > 0 ? String(associate.pendingAmount) : ""
+      manualAssociateName: "",
+      expectedAmount: isOther ? "" : expectedPrefill(associate),
+      expectedOriginal: isOther ? "0" : String(associate?.expectedAmount ?? associate?.pendingAmount ?? 0),
+      pendingOverrideRemarks: "",
+      denominationUnlocked: isOther ? true : Boolean(associate) && !pending,
+      denominationCounts: emptyDenominations(),
+      cashOtherAmount: ""
     } : row));
+    if (!isOther && pending) setPendingModalKey(key);
+    else setPendingModalKey((current) => current === key ? null : current);
   }
 
   function updateRow(key: number, update: Partial<EntryRow>) {
@@ -127,6 +175,9 @@ export function AssociateEntryBuilder({
     } : row));
   }
 
+  const pendingRow = pendingModalKey == null ? null : rows.find((row) => row.key === pendingModalKey) ?? null;
+  const pendingAssociate = pendingRow ? optionMap.get(pendingRow.providerEmployeeId) : null;
+
   return (
     <div className="reconciliation-entry-list" aria-label="Add associate reconciliation rows">
       {rows.map((entry, index) => {
@@ -136,17 +187,19 @@ export function AssociateEntryBuilder({
           rows.filter((row) => row.key !== entry.key).map((row) => row.providerEmployeeId).filter(Boolean)
         );
         const associateOptions = associates
-          .filter((option) => option.providerEmployeeId === entry.providerEmployeeId || !selectedByOtherRow.has(option.providerEmployeeId))
+          .filter((option) => option.providerEmployeeId === entry.providerEmployeeId || option.providerEmployeeId === "__other__" || !selectedByOtherRow.has(option.providerEmployeeId))
           .map((option) => ({
             value: option.providerEmployeeId,
             label: option.name,
-            helper: option.providerEmployeeId
+            helper: option.providerEmployeeId === "__other__" ? "Manual name" : option.providerEmployeeId
           }));
         const collectedAmount = denominations.reduce(
           (total, [name, , amount]) => total + numberValue(entry.denominationCounts[name]) * amount,
           numberValue(entry.cashOtherAmount)
         );
         const expectedAmount = numberValue(entry.expectedAmount);
+        const expectedOriginal = numberValue(entry.expectedOriginal);
+        const expectedEdited = Math.abs(expectedAmount - expectedOriginal) >= 0.01;
         const difference = collectedAmount - expectedAmount;
         const cashState = expectedAmount === 0 && collectedAmount === 0
           ? { className: "waiting", label: "Enter amounts", amount: "" }
@@ -155,6 +208,12 @@ export function AssociateEntryBuilder({
           : difference < 0
             ? { className: "short", label: "Pending", amount: `₹${currency(Math.abs(difference))}` }
             : { className: "excess", label: "Excess", amount: `₹${currency(difference)}` };
+        const isOther = entry.providerEmployeeId === "__other__";
+        const canSave = Boolean(entry.providerEmployeeId)
+          && entry.denominationUnlocked
+          && (!expectedEdited || entry.remarks.trim())
+          && (!isOther || entry.manualAssociateName.trim());
+
         return (
           <article className="reconciliation-entry-card" key={entry.key}>
             <form action={saveExecutiveReconciliation} id={formId}>
@@ -169,61 +228,98 @@ export function AssociateEntryBuilder({
                     required
                   />
                 </label>
+                {isOther ? (
+                  <label>Associate name
+                    <input
+                      className="field"
+                      name="manual_associate_name"
+                      value={entry.manualAssociateName}
+                      onChange={(event) => updateRow(entry.key, { manualAssociateName: event.target.value })}
+                      placeholder="Enter associate name"
+                      required
+                    />
+                  </label>
+                ) : null}
                 <label>Expected COD
                   <input
                     className="field"
                     name="expected_amount"
                     value={entry.expectedAmount}
-                    onChange={(event) => updateRow(entry.key, { expectedAmount: event.target.value })}
+                    onChange={(event) => updateRow(entry.key, {
+                      expectedAmount: event.target.value,
+                      ...(isOther ? { expectedOriginal: event.target.value } : {})
+                    })}
                     inputMode="decimal"
                     placeholder="₹ 0"
                   />
                 </label>
                 <label>Remarks
-                  <input className="field" name="remarks" placeholder="Optional note" />
+                  <input
+                    className="field"
+                    name="remarks"
+                    value={entry.remarks}
+                    onChange={(event) => updateRow(entry.key, { remarks: event.target.value })}
+                    placeholder={expectedEdited ? "Required — why expected was changed" : "Optional note"}
+                    required={expectedEdited || Boolean(entry.pendingOverrideRemarks)}
+                  />
                 </label>
                 <div className="reconciliation-row-actions">
                   <input type="hidden" name="return_href" value={returnHref} />
                   <input type="hidden" name="business_date" value={businessDate} />
                   <input type="hidden" name="location_id" value={locationId} />
                   <input type="hidden" name="station_code" value={stationCode} />
-                  <input type="hidden" name="source_associate_name" value={associate?.name ?? ""} />
-                  <input type="hidden" name="shipment_type" value={associate?.shipmentType ?? "SCC Driver Reconciliation"} />
+                  <input type="hidden" name="source_associate_name" value={isOther ? entry.manualAssociateName : (associate?.name ?? "")} />
+                  <input type="hidden" name="shipment_type" value={associate?.shipmentType ?? "Shipment data"} />
                   <input type="hidden" name="total_delivery" value="0" />
                   <input type="hidden" name="total_activity" value="0" />
-                  <SubmitButton disabled={!canEdit || !entry.providerEmployeeId}>Save cash</SubmitButton>
+                  <input type="hidden" name="expected_original" value={entry.expectedOriginal || "0"} />
+                  <input type="hidden" name="pending_recon_amount" value={String(associate?.pendingRecon ?? 0)} />
+                  <input type="hidden" name="pending_override_remarks" value={entry.pendingOverrideRemarks} />
+                  <SubmitButton disabled={!canEdit || !canSave}>Save cash</SubmitButton>
                   {rows.length > 1 ? (
                     <button className="button ghost" type="button" onClick={() => removeRow(entry.key)} aria-label={`Remove associate row ${index + 1}`}>Remove</button>
                   ) : null}
                 </div>
               </div>
-              <details className="cash-breakdown">
-                <summary>Cash denomination count</summary>
-                <div className="cash-breakdown-grid">
-                  {denominations.map(([name, label]) => (
-                    <label key={`${entry.key}-${name}`}>{label}
+              {!entry.denominationUnlocked && entry.providerEmployeeId ? (
+                <div className="panel message-panel warn" style={{ marginTop: 12 }}>
+                  <div className="panel-body">
+                    <strong>Pending recon ₹{currency(Number(associate?.pendingRecon ?? 0))}</strong>
+                    <p className="subtle" style={{ marginTop: 6 }}>Clear pending in SCC or confirm override to unlock denomination count.</p>
+                    <button className="button secondary" type="button" style={{ marginTop: 8 }} onClick={() => setPendingModalKey(entry.key)}>
+                      Review pending recon
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <details className="cash-breakdown" open={Boolean(entry.providerEmployeeId)}>
+                  <summary>Cash denomination count</summary>
+                  <div className="cash-breakdown-grid">
+                    {denominations.map(([name, label]) => (
+                      <label key={`${entry.key}-${name}`}>{label}
+                        <input
+                          className="field"
+                          name={name}
+                          value={entry.denominationCounts[name]}
+                          onChange={(event) => updateDenomination(entry.key, name, event.target.value)}
+                          inputMode="numeric"
+                          placeholder="0"
+                        />
+                      </label>
+                    ))}
+                    <label>Other / coins
                       <input
                         className="field"
-                        name={name}
-                        value={entry.denominationCounts[name]}
-                        onChange={(event) => updateDenomination(entry.key, name, event.target.value)}
-                        inputMode="numeric"
+                        name="cash_other_amount"
+                        value={entry.cashOtherAmount}
+                        onChange={(event) => updateRow(entry.key, { cashOtherAmount: event.target.value })}
+                        inputMode="decimal"
                         placeholder="0"
                       />
                     </label>
-                  ))}
-                  <label>Other / coins
-                    <input
-                      className="field"
-                      name="cash_other_amount"
-                      value={entry.cashOtherAmount}
-                      onChange={(event) => updateRow(entry.key, { cashOtherAmount: event.target.value })}
-                      inputMode="decimal"
-                      placeholder="0"
-                    />
-                  </label>
-                </div>
-              </details>
+                  </div>
+                </details>
+              )}
               <div className={`cash-live-status ${cashState.className}`} aria-live="polite">
                 <span>Collected <strong>₹{currency(collectedAmount)}</strong></span>
                 <span>Expected <strong>₹{currency(expectedAmount)}</strong></span>
@@ -240,8 +336,27 @@ export function AssociateEntryBuilder({
         <button className="button secondary" type="button" onClick={addAllDrivers} disabled={!associates.length || !canEdit}>
           Add all drivers
         </button>
-        <span className="subtle">{associates.length ? `${associates.length} associates available for ${stationCode} · ${stationLabel}` : "Run SCC sync to load the station roster."}</span>
+        <span className="subtle">
+          {associates.length
+            ? `${associates.length} associates available for ${stationCode} · ${stationLabel}`
+            : (emptyHint || "Run SCC sync to load the station roster.")}
+        </span>
       </div>
+
+      {pendingRow && pendingAssociate ? (
+        <PendingReconModal
+          associateName={pendingAssociate.name}
+          pendingAmount={pendingAssociate.pendingRecon}
+          breakdown={pendingAssociate.breakdown}
+          overrideRemarks={pendingRow.pendingOverrideRemarks}
+          onOverrideRemarksChange={(value) => updateRow(pendingRow.key, { pendingOverrideRemarks: value })}
+          onClose={() => setPendingModalKey(null)}
+          onConfirmOverride={() => {
+            updateRow(pendingRow.key, { denominationUnlocked: true });
+            setPendingModalKey(null);
+          }}
+        />
+      ) : null}
     </div>
   );
 }

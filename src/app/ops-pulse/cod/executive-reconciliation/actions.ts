@@ -13,6 +13,7 @@ import { requirePagePermission, type AuthorizationContext } from "@/lib/authoriz
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { finalizeCodClosure, notifyCodManager } from "@/lib/ops-pulse/cod-day-closure";
 import { canAccessCodAudit, writeCodAudit } from "@/lib/ops-pulse/cod-audit";
+import { fetchLiabilitySummary, isCashReconWorkerConfigured } from "@/lib/ops-pulse/cash-recon-worker";
 
 const pagePath = "/ops-pulse/cod/executive-reconciliation";
 const publicPagePath = "/cod/executive-reconciliation";
@@ -166,9 +167,27 @@ async function savePayload(
     throw new Error("Associate name is required when the executive is not available in SCC Driver Reconciliation.");
   }
   const providerEmployeeIdInput = clean(formData.get("provider_employee_id"))?.trim();
-  const providerEmployeeId = !providerEmployeeIdInput || providerEmployeeIdInput === "__manual__"
-    ? manualExecutiveId(station.station_code, businessDate, required(formData.get("manual_associate_name"), "Associate name"))
+  const providerEmployeeId = !providerEmployeeIdInput
+    || providerEmployeeIdInput === "__manual__"
+    || providerEmployeeIdInput === "__other__"
+    ? manualExecutiveId(
+      station.station_code,
+      businessDate,
+      required(manualAssociateName || formData.get("manual_associate_name"), "Associate name")
+    )
     : providerEmployeeIdInput;
+
+  const expectedOriginalText = clean(formData.get("expected_original"));
+  const expectedAmount = optionalAmount(formData.get("expected_amount"), "Expected COD amount");
+  const expectedOriginal = expectedOriginalText == null || expectedOriginalText === ""
+    ? expectedAmount
+    : optionalAmount(expectedOriginalText, "Original expected COD");
+  const expectedEdited = Math.abs(expectedAmount - expectedOriginal) >= 0.01;
+  const pendingRecon = optionalAmount(formData.get("pending_recon_amount") ?? "0", "Pending recon");
+  const pendingOverrideRemarks = clean(formData.get("pending_override_remarks"));
+  if (pendingRecon > 0.01 && !pendingOverrideRemarks) {
+    throw new Error("Pending cash recon is above zero. Clear it in SCC or provide manual override remarks.");
+  }
 
   const cash500 = optionalCount(formData.get("cash_500_count"), "Rs 500 note count");
   const cash200 = optionalCount(formData.get("cash_200_count"), "Rs 200 note count");
@@ -177,7 +196,6 @@ async function savePayload(
   const cash20 = optionalCount(formData.get("cash_20_count"), "Rs 20 note count");
   const cash10 = optionalCount(formData.get("cash_10_count"), "Rs 10 note count");
   const cashOther = optionalAmount(formData.get("cash_other_amount"), "Other cash amount");
-  const expectedAmount = optionalAmount(formData.get("expected_amount"), "Expected COD amount");
   const collectedAmount = Number((
     cash500 * 500 +
     cash200 * 200 +
@@ -188,6 +206,16 @@ async function savePayload(
     cashOther
   ).toFixed(2));
   const differenceAmount = Number((collectedAmount - expectedAmount).toFixed(2));
+  const baseRemarks = clean(formData.get("remarks"));
+  if (expectedEdited && !baseRemarks) {
+    throw new Error("Remarks are required when Expected COD is edited.");
+  }
+  const remarkParts = [
+    baseRemarks,
+    expectedEdited ? `Expected edited from ₹${expectedOriginal.toFixed(2)} to ₹${expectedAmount.toFixed(2)}.` : null,
+    pendingOverrideRemarks ? `Pending recon override: ${pendingOverrideRemarks}` : null
+  ].filter(Boolean);
+  const remarks = remarkParts.length ? remarkParts.join(" ") : null;
 
   const payload = withCompany({
     business_date: businessDate,
@@ -211,7 +239,7 @@ async function savePayload(
     cash_other_amount: cashOther,
     collected_amount: collectedAmount,
     difference_amount: differenceAmount,
-    remarks: clean(formData.get("remarks")),
+    remarks,
     updated_by: authorization.userId
   }, companyId);
 
@@ -332,8 +360,28 @@ export async function submitCodCashCollection(formData: FormData) {
     if (existingClosure.data?.is_final_submitted) {
       throw new Error("This COD day is finally submitted and locked.");
     }
-    if (!settingResult.data?.id || settingResult.data.is_active === false) {
+    const cashReconReady = isCashReconWorkerConfigured();
+    const codMaster = settingResult.data?.id && settingResult.data.is_active !== false
+      ? settingResult.data
+      : null;
+    // Cash-recon worker liability check replaces COD Master for submit.
+    // Old portal SCC queue still needs COD Master when that worker path is used.
+    if (!cashReconReady && !codMaster) {
       throw new Error("Add this station in COD Master before submitting cash and running SCC.");
+    }
+
+    const liabilityOverrideRemarks = clean(formData.get("liability_override_remarks"));
+    if (cashReconReady) {
+      const liability = await fetchLiabilitySummary({
+        stationCode: station.station_code,
+        date: businessDate
+      });
+      if (!liability.isClear && !liabilityOverrideRemarks) {
+        const cash = liability.cashSummary;
+        throw new Error(
+          `SCC cash liability is not clear (expected ₹${cash.expectedAmount.toFixed(2)}, actual ₹${cash.actualAmount.toFixed(2)}, short/excess ₹${cash.shortExcessAmount.toFixed(2)}, count ${cash.count}). Clear cash liability in SCC or submit with override remarks.`
+        );
+      }
     }
 
     const rows = reconciliations.data ?? [];
@@ -366,6 +414,7 @@ export async function submitCodCashCollection(formData: FormData) {
       variance_count: varianceRows.length,
       submitted_at: now,
       submitted_by: authorization.userId,
+      liability_override_remarks: liabilityOverrideRemarks,
       rows: rows.map((row) => ({
         reconciliation_id: row.id,
         provider_employee_id: row.provider_employee_id,
@@ -383,14 +432,23 @@ export async function submitCodCashCollection(formData: FormData) {
       location_id: locationId,
       station_code: station.station_code,
       collected_cod: collectedCod,
+      amazon_open_remittance_expected: 0,
+      amazon_open_remittance_count: 0,
       difference_amount: difference,
-      validation_status: Math.abs(difference) >= 0.01 ? "Mismatch" : "Validation required",
+      driver_reconciliation_pending: 0,
+      no_deposit_liability: false,
+      is_final_submitted: false,
+      validation_status: Math.abs(difference) >= 0.01
+        ? "Mismatch"
+        : cashReconReady && !codMaster
+          ? "Matched"
+          : "Validation required",
       submission_status: "Submitted",
       manager_status: Math.abs(difference) >= 0.01 ? "Pending" : "Not required",
       validation_snapshot: { ...previousSnapshot, cash_submission: cashSnapshot },
       submitted_by: authorization.userId,
       submitted_at: now,
-      driver_check_status: "Queued",
+      driver_check_status: cashReconReady && !codMaster ? "Passed" : "Queued",
       deposit_check_status: "Locked",
       updated_at: now
     };
@@ -407,7 +465,11 @@ export async function submitCodCashCollection(formData: FormData) {
     } else {
       const inserted = await supabaseAdmin
         .from("cod_day_closures")
-        .insert(closurePayload)
+        .insert({
+          ...closurePayload,
+          id: crypto.randomUUID(),
+          created_at: now
+        })
         .select("id")
         .single();
       if (inserted.error) throw new Error(inserted.error.message);
@@ -415,31 +477,52 @@ export async function submitCodCashCollection(formData: FormData) {
     }
     if (!closureId) throw new Error("Could not create the cash submission record.");
 
-    const run = await supabaseAdmin
-      .from("ops_portal_check_runs")
-      .upsert({
-        company_id: companyId,
-        location_id: locationId,
-        cod_master_id: settingResult.data.id,
-        station_code: station.station_code,
-        portal_station_code: settingResult.data.portal_station_code ?? station.station_code,
-        check_date: businessDate,
-        check_type: "driver_reconciliation",
-        status: "Queued",
-        pending_count: 0,
-        pending_amount: 0,
-        summary: "Queued automatically after COD cash submission.",
-        evidence: {},
-        raw_result: {},
-        attempt_count: 0,
-        next_check_at: now,
-        error_message: null,
-        updated_at: now,
-        created_by: authorization.userId
-      }, { onConflict: "company_id,location_id,check_date,check_type" })
-      .select("id")
-      .single();
-    if (run.error) throw new Error(run.error.message);
+    let driverCheckRunId: string | null = null;
+    let driverCheckStatus = cashReconReady ? "Passed" : "Queued";
+    if (codMaster) {
+      const run = await supabaseAdmin
+        .from("ops_portal_check_runs")
+        .upsert({
+          company_id: companyId,
+          location_id: locationId,
+          cod_master_id: codMaster.id,
+          station_code: station.station_code,
+          portal_station_code: codMaster.portal_station_code ?? station.station_code,
+          check_date: businessDate,
+          check_type: "driver_reconciliation",
+          status: "Queued",
+          pending_count: 0,
+          pending_amount: 0,
+          summary: "Queued automatically after COD cash submission.",
+          evidence: {},
+          raw_result: {},
+          attempt_count: 0,
+          next_check_at: now,
+          error_message: null,
+          updated_at: now,
+          created_by: authorization.userId
+        }, { onConflict: "company_id,location_id,check_date,check_type" })
+        .select("id")
+        .single();
+      if (run.error) throw new Error(run.error.message);
+      driverCheckRunId = run.data.id as string;
+      driverCheckStatus = "Queued";
+
+      const baseUrl = appBaseUrl();
+      if (baseUrl) {
+        waitUntil(fetch(`${baseUrl}/api/cron/ops-pulse-portal-checks`, {
+          method: "POST",
+          headers: {
+            ...(process.env.CRON_SECRET ? { Authorization: `Bearer ${process.env.CRON_SECRET}` } : {}),
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ run_id: driverCheckRunId }),
+          cache: "no-store"
+        }).catch(() => undefined));
+      }
+    } else if (cashReconReady) {
+      // Liability already verified via cash-recon worker; keep driver check clear for the wizard.
+    }
 
     const previousDifference = Number(previousCash.difference_amount ?? Number.NaN);
     const varianceChanged = !Number.isFinite(previousDifference) || Math.abs(previousDifference - difference) >= 0.01;
@@ -469,7 +552,7 @@ export async function submitCodCashCollection(formData: FormData) {
         stationCode: station.station_code,
         notificationType: "COD variance",
         title: `COD ${difference < 0 ? "shortage" : "excess"}: ${station.station_code} on ${businessDate}`,
-        message: `Cash was submitted ${varianceLabel}. Expected ₹${expectedCod.toFixed(2)}; collected ₹${collectedCod.toFixed(2)} across ${rows.length} associates. ${varianceRows.length} associate row${varianceRows.length === 1 ? "" : "s"} require manager review. SCC Driver Reconciliation has been queued.`
+        message: `Cash was submitted ${varianceLabel}. Expected ₹${expectedCod.toFixed(2)}; collected ₹${collectedCod.toFixed(2)} across ${rows.length} associates. ${varianceRows.length} associate row${varianceRows.length === 1 ? "" : "s"} require manager review.${cashReconReady ? " Cash liability was checked via cash recon worker." : " SCC Driver Reconciliation has been queued."}`
       });
     } else if (Math.abs(difference) < 0.01) {
       await supabaseAdmin
@@ -482,7 +565,12 @@ export async function submitCodCashCollection(formData: FormData) {
 
     await writeCodAudit({
       action: Math.abs(difference) >= 0.01 ? "COD cash submitted with variance" : "COD cash submitted",
-      after: { ...cashSnapshot, driver_check_run_id: run.data.id, driver_check_status: "Queued" },
+      after: {
+        ...cashSnapshot,
+        driver_check_run_id: driverCheckRunId,
+        driver_check_status: driverCheckStatus,
+        cash_recon_liability_checked: cashReconReady
+      },
       authorization,
       businessDate,
       closureId,
@@ -490,26 +578,15 @@ export async function submitCodCashCollection(formData: FormData) {
       stationCode: station.station_code
     });
 
-    const baseUrl = appBaseUrl();
-    if (baseUrl) {
-      waitUntil(fetch(`${baseUrl}/api/cron/ops-pulse-portal-checks`, {
-        method: "POST",
-        headers: {
-          ...(process.env.CRON_SECRET ? { Authorization: `Bearer ${process.env.CRON_SECRET}` } : {}),
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({ run_id: run.data.id }),
-        cache: "no-store"
-      }).catch(() => undefined));
-    }
-
     revalidatePath(pagePath);
     revalidatePath("/ops-pulse/cod/portal-checks");
     const notice = difference < 0
-      ? `COD submitted with shortage ₹${shortAmount.toFixed(2)}. Manager notified; Driver Reconciliation is running.`
+      ? `COD submitted with shortage ₹${shortAmount.toFixed(2)}. Manager notified${cashReconReady ? "; cash liability checked." : "; Driver Reconciliation is running."}`
       : difference > 0
-        ? `COD submitted with excess ₹${excessAmount.toFixed(2)}. Manager notified; Driver Reconciliation is running.`
-        : "COD submitted with no variance. Driver Reconciliation is running.";
+        ? `COD submitted with excess ₹${excessAmount.toFixed(2)}. Manager notified${cashReconReady ? "; cash liability checked." : "; Driver Reconciliation is running."}`
+        : cashReconReady
+          ? "COD submitted with no variance. Cash liability check passed."
+          : "COD submitted with no variance. Driver Reconciliation is running.";
     redirectWithFlash({ notice }, returnHref);
   } catch (error) {
     if (isNextRedirectError(error)) throw error;
@@ -820,18 +897,32 @@ export async function queueCodClosureCheck(formData: FormData) {
     }
 
     if (!closureResult.data) {
+      const nowDraft = new Date().toISOString();
       closureResult = await supabaseAdmin
         .from("cod_day_closures")
         .insert({
+          id: crypto.randomUUID(),
           company_id: companyId,
           business_date: businessDate,
           location_id: locationId,
           station_code: station.station_code,
+          collected_cod: 0,
+          amazon_open_remittance_expected: 0,
+          amazon_open_remittance_count: 0,
+          difference_amount: 0,
+          driver_reconciliation_pending: 0,
+          no_deposit_liability: false,
+          is_final_submitted: false,
+          validation_status: "Pending",
+          validation_snapshot: {},
           submission_status: "Draft",
           manager_status: "Not required",
           driver_check_status: checkType === "driver_reconciliation" ? "Queued" : "Passed",
           deposit_check_status: checkType === "prepared_deposit" ? "Queued" : "Locked",
-          submitted_by: authorization.userId
+          submitted_by: authorization.userId,
+          submitted_at: nowDraft,
+          created_at: nowDraft,
+          updated_at: nowDraft
         })
         .select("id, driver_check_status, is_final_submitted")
         .single();
