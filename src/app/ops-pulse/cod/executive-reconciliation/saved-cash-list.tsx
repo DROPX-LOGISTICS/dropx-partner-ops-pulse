@@ -40,6 +40,12 @@ function stringValue(value: unknown) {
   return typeof value === "string" ? value : "";
 }
 
+function amountValueFromUnknown(value: unknown): number | string | null | undefined {
+  if (value == null) return value;
+  if (typeof value === "number" || typeof value === "string") return value;
+  return undefined;
+}
+
 type PendingDetail = ExecutiveReconciliationViewRow["scc_pending_details"] extends (infer Item)[] | null ? Item : never;
 
 function detailTrackingId(detail: PendingDetail, index: number) {
@@ -49,7 +55,9 @@ function detailTrackingId(detail: PendingDetail, index: number) {
 
 function detailAmount(detail: PendingDetail): number | string | null | undefined {
   const raw = objectValue(detail.raw_row);
-  return detail.amount ?? raw.amount ?? raw.pendingAmount;
+  return detail.amount
+    ?? amountValueFromUnknown(raw.amount)
+    ?? amountValueFromUnknown(raw.pendingAmount);
 }
 
 function detailStatus(detail: PendingDetail) {
