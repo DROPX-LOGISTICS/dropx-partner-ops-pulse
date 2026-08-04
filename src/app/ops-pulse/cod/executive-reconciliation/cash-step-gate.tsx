@@ -66,25 +66,39 @@ function IncompleteDriversModal({
         </div>
         <div className="panel-body">
           <p className="subtle" style={{ marginBottom: 12 }}>
-            Select each driver below in Collect cash, count denominations, and save. Continue unlocks only when all are entered.
+            Select each driver in <strong>Collect cash</strong> or <strong>Add associate missing from DER</strong>,
+            count denominations, and save. Unmapped drivers show a Driver ID — type the employee name when entering cash.
+            Continue unlocks only when all are entered.
           </p>
           <div className="table-wrap">
             <table>
               <thead>
                 <tr>
                   <th>Associate</th>
-                  <th>Employee ID</th>
+                  <th>Driver / Employee ID</th>
                   <th>Expected</th>
                 </tr>
               </thead>
               <tbody>
-                {missing.length ? missing.map((row) => (
-                  <tr key={row.providerEmployeeId}>
-                    <td><strong>{row.displayName || row.name}</strong></td>
-                    <td>{row.providerEmployeeId}</td>
-                    <td>₹{currency(row.expected)}</td>
-                  </tr>
-                )) : (
+                {missing.length ? missing.map((row) => {
+                  const label = row.displayName || row.name;
+                  const unmapped = /^unmapped driver/i.test(String(label))
+                    || String(row.shipmentType ?? "").toLowerCase().includes("unmapped");
+                  return (
+                    <tr key={row.providerEmployeeId}>
+                      <td>
+                        <strong>{label}</strong>
+                        {unmapped ? (
+                          <div className="subtle" style={{ marginTop: 4 }}>
+                            Type employee name when entering cash (Missing DER).
+                          </div>
+                        ) : null}
+                      </td>
+                      <td>{row.providerEmployeeId}</td>
+                      <td>₹{currency(row.expected)}</td>
+                    </tr>
+                  );
+                }) : (
                   <tr>
                     <td className="empty-cell" colSpan={3}>
                       {!loaded

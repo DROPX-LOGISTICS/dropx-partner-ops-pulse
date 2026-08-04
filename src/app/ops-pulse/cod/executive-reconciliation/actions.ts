@@ -222,7 +222,7 @@ async function savePayload(
     location_id: station.id,
     station_code: station.station_code,
     provider_employee_id: providerEmployeeId,
-    source_associate_name: sourceAssociateName,
+    source_associate_name: sourceAssociateName ?? manualAssociateName,
     manual_associate_name: manualAssociateName,
     shipment_type: clean(formData.get("shipment_type")),
     total_delivery: optionalNumber(formData.get("total_delivery")),

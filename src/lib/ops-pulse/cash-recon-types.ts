@@ -49,6 +49,8 @@ export type ExpectedCashByDriver = {
   employeeId?: number | string | null;
   driverName?: string | null;
   tasId?: string | null;
+  /** False when ageing driverId was not in getDrivers. */
+  mappedToActiveDriver?: boolean | null;
   totalReceived?: number | null;
   shipmentCount?: number | null;
   shipments?: ExpectedCashShipment[] | null;
@@ -185,7 +187,8 @@ export function indexExpectedCashByDriver(expectedCash: ExpectedCashSummary | nu
   for (const row of rows) {
     const employeeId = String(row.employeeId ?? "").trim().toUpperCase();
     const tasId = String(row.tasId ?? "").trim().toUpperCase();
-    if (employeeId) byEmployeeId.set(employeeId, row);
+    // Skip null/empty and placeholder 0 from unmapped rows.
+    if (employeeId && employeeId !== "0" && employeeId !== "NULL") byEmployeeId.set(employeeId, row);
     if (tasId) byTasId.set(tasId, row);
   }
   return { byEmployeeId, byTasId };
@@ -308,6 +311,63 @@ function findReconForBaseline(
     associateNamesMatch(baseline.name, String(row.driverInfo?.name ?? ""))
     || associateNamesMatch(driverDisplayName(driver?.driverName ?? ""), String(row.driverInfo?.name ?? ""))
   ) ?? null;
+}
+
+/**
+ * Ageing cash rows whose driverId is not in getDrivers (or not already on Collect /
+ * Missing DER) must still appear so ops can enter that cash.
+ */
+function appendUnmappedExpectedCash(
+  associates: CashReconAssociate[],
+  missingFromDer: CashReconAssociate[],
+  expectedCash: ExpectedCashSummary | null
+): void {
+  if (!Array.isArray(expectedCash?.byDriver)) return;
+  const pool = [...associates, ...missingFromDer];
+
+  for (const cashRow of expectedCash.byDriver) {
+    const expected = moneyValue(cashRow.totalReceived);
+    if (expected <= 0.01) continue;
+
+    const employeeId = String(cashRow.employeeId ?? "").trim();
+    const tasId = String(cashRow.tasId ?? "").trim();
+    const already = pool.find((associate) => {
+      const associateId = String(associate.providerEmployeeId ?? "").trim().toUpperCase();
+      const associateEmployeeId = String(associate.employeeId ?? "").trim().toUpperCase();
+      return (employeeId && employeeId !== "0" && (associateId === employeeId.toUpperCase() || associateEmployeeId === employeeId.toUpperCase()))
+        || (tasId && (associateId === tasId.toUpperCase() || associateEmployeeId === tasId.toUpperCase()))
+        || associateNamesMatch(associate.displayName || associate.name, String(cashRow.driverName ?? ""));
+    });
+    if (already) {
+      if (already.expected <= 0.01) already.expected = expected;
+      continue;
+    }
+
+    // Only surface rows that were not mapped to getDrivers (or have no active-driver match).
+    const isMapped = cashRow.mappedToActiveDriver === true
+      || (cashRow.mappedToActiveDriver == null && Boolean(employeeId && employeeId !== "0"));
+    if (isMapped) continue;
+
+    const providerEmployeeId = (employeeId && employeeId !== "0" ? employeeId : null)
+      || tasId
+      || "__unassigned_cash__";
+    const fullName = String(cashRow.driverName ?? "").trim()
+      || (tasId ? `Unmapped driver (${tasId})` : "Unassigned driver");
+
+    const row: CashReconAssociate = {
+      providerEmployeeId,
+      name: fullName,
+      displayName: fullName,
+      employeeId: employeeId && employeeId !== "0" ? employeeId : null,
+      expected,
+      pendingRecon: 0,
+      breakdown: [],
+      source: "extra",
+      shipmentType: "Ageing cash (unmapped driver)"
+    };
+    missingFromDer.push(row);
+    pool.push(row);
+  }
 }
 
 export function buildCashReconAssociates(
@@ -434,6 +494,8 @@ export function buildCashReconAssociates(
       if (mapped) missingFromDer.push(mapped);
     });
 
+    appendUnmappedExpectedCash(associates, missingFromDer, expectedCash);
+
     missingFromDer.push({
       providerEmployeeId: "__other__",
       name: "Other",
@@ -503,6 +565,8 @@ export function buildCashReconAssociates(
     if (mapped) missingFromDer.push(mapped);
   });
 
+  appendUnmappedExpectedCash(associates, missingFromDer, expectedCash);
+
   missingFromDer.push({
     providerEmployeeId: "__other__",
     name: "Other",
@@ -555,7 +619,8 @@ export function buildRequiredCashAssociates(
     for (const cashRow of expectedCash?.byDriver ?? []) {
       const expected = moneyValue(cashRow.totalReceived);
       if (expected <= 0.01) continue;
-      const employeeId = String(cashRow.employeeId ?? "").trim();
+      const employeeIdRaw = String(cashRow.employeeId ?? "").trim();
+      const employeeId = employeeIdRaw && employeeIdRaw !== "0" ? employeeIdRaw : "";
       const tasId = String(cashRow.tasId ?? "").trim();
       const matched = pool.find((associate) => {
         const associateId = String(associate.providerEmployeeId ?? "").trim().toUpperCase();
@@ -569,10 +634,11 @@ export function buildRequiredCashAssociates(
         continue;
       }
       const driver = drivers.find((item) =>
-        String(item.employeeId ?? "").trim().toUpperCase() === employeeId.toUpperCase()
-        || String(item.tasId ?? "").trim().toUpperCase() === tasId.toUpperCase()
+        (employeeId && String(item.employeeId ?? "").trim().toUpperCase() === employeeId.toUpperCase())
+        || (tasId && String(item.tasId ?? "").trim().toUpperCase() === tasId.toUpperCase())
       );
-      const fullName = String(driver?.driverName ?? cashRow.driverName ?? "").trim() || employeeId || tasId;
+      const fullName = String(driver?.driverName ?? cashRow.driverName ?? "").trim()
+        || (tasId ? `Unmapped driver (${tasId})` : "Unassigned driver");
       upsert({
         providerEmployeeId: employeeId || tasId || fullName,
         name: fullName,
@@ -582,7 +648,9 @@ export function buildRequiredCashAssociates(
         pendingRecon: 0,
         breakdown: [],
         source: "extra",
-        shipmentType: "Cash recon worker"
+        shipmentType: cashRow.mappedToActiveDriver === false
+          ? "Ageing cash (unmapped driver)"
+          : "Cash recon worker"
       });
     }
     return Array.from(byKey.values()).sort((a, b) =>

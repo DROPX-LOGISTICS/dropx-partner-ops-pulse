@@ -134,6 +134,15 @@ function enrichCollectCash(
   });
 }
 
+function isUnmappedDriverLabel(name: string, shipmentType: string, employeeId: string) {
+  const normalizedName = name.trim().toLowerCase();
+  const normalizedType = shipmentType.trim().toLowerCase();
+  if (normalizedType.includes("unmapped")) return true;
+  if (normalizedName.startsWith("unmapped driver")) return true;
+  if ((!employeeId || employeeId === "0") && normalizedName.startsWith("unmapped")) return true;
+  return false;
+}
+
 /** Prefer API missingFromDer; use employeeId (not tasId) as the select/save id when present. */
 function mapMissingFromDer(apiMissing: CashReconAssociate[]): AssociateOption[] {
   const rows = apiMissing
@@ -141,14 +150,22 @@ function mapMissingFromDer(apiMissing: CashReconAssociate[]): AssociateOption[] 
     .map((row) => {
       const employeeId = String(row.employeeId ?? "").trim();
       const fallbackId = String(row.providerEmployeeId ?? "").trim();
+      const providerEmployeeId = employeeId && employeeId !== "0" ? employeeId : fallbackId;
+      const rawName = String(row.displayName || row.name || "").trim();
+      const shipmentType = row.shipmentType || "Cash recon worker";
+      const requiresManualName = isUnmappedDriverLabel(rawName, shipmentType, employeeId);
+      const name = requiresManualName && providerEmployeeId
+        ? (rawName.match(/^Unmapped driver/i) ? `Unmapped · ${providerEmployeeId}` : rawName)
+        : rawName;
       return {
-        name: String(row.displayName || row.name || "").trim(),
-        providerEmployeeId: employeeId || fallbackId,
-        shipmentType: row.shipmentType || "Cash recon worker",
+        name,
+        providerEmployeeId,
+        shipmentType,
         pendingAmount: Number(row.expected) || 0,
         expectedAmount: Number(row.expected) || 0,
         pendingRecon: Number(row.pendingRecon) || 0,
-        breakdown: Array.isArray(row.breakdown) ? row.breakdown : []
+        breakdown: Array.isArray(row.breakdown) ? row.breakdown : [],
+        requiresManualName
       } satisfies AssociateOption;
     })
     .filter((row) => row.providerEmployeeId && row.name);
@@ -160,7 +177,8 @@ function mapMissingFromDer(apiMissing: CashReconAssociate[]): AssociateOption[] 
     pendingAmount: 0,
     expectedAmount: 0,
     pendingRecon: 0,
-    breakdown: []
+    breakdown: [],
+    requiresManualName: true
   });
 
   return rows;

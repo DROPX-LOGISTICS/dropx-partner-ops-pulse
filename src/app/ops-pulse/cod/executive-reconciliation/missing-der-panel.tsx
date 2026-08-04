@@ -24,7 +24,8 @@ export function MissingDerPanel({
       <summary>Add associate missing from DER</summary>
       <div className="panel-body">
         <p className="subtle" style={{ marginBottom: 12 }}>
-          Names from cash-recon <code>drivers</code> that are not on the station DB list, plus <strong>Other</strong> for a fully manual associate.
+          Names from cash-recon that are not on the station DB list, including unmapped Amazon drivers
+          (Driver ID only — type the employee name before save), plus <strong>Other</strong> for a fully manual associate.
         </p>
         <AssociateEntryBuilder
           associates={associates}

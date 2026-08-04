@@ -17,6 +17,8 @@ export type AssociateOption = {
   expectedAmount: number;
   pendingRecon: number;
   breakdown: CashReconPendingBreakdown[];
+  /** Unmapped Amazon driver (tasId only) — ops must type employee name before save. */
+  requiresManualName?: boolean;
 };
 
 type EntryRow = {
@@ -149,6 +151,7 @@ export function AssociateEntryBuilder({
     const associate = optionMap.get(providerEmployeeId);
     const pending = Number(associate?.pendingRecon ?? 0) > 0.01;
     const isOther = providerEmployeeId === "__other__";
+    const requiresManualName = isOther || Boolean(associate?.requiresManualName);
     setRows((current) => current.map((row) => row.key === key ? {
       ...row,
       providerEmployeeId,
@@ -156,7 +159,7 @@ export function AssociateEntryBuilder({
       expectedAmount: isOther ? "" : expectedPrefill(associate),
       expectedOriginal: isOther ? "0" : String(associate?.expectedAmount ?? associate?.pendingAmount ?? 0),
       pendingOverrideRemarks: "",
-      denominationUnlocked: isOther ? true : Boolean(associate) && !pending,
+      denominationUnlocked: requiresManualName && isOther ? true : Boolean(associate) && !pending,
       denominationCounts: emptyDenominations(),
       cashOtherAmount: ""
     } : row));
@@ -191,7 +194,11 @@ export function AssociateEntryBuilder({
           .map((option) => ({
             value: option.providerEmployeeId,
             label: option.name,
-            helper: option.providerEmployeeId === "__other__" ? "Manual name" : option.providerEmployeeId
+            helper: option.providerEmployeeId === "__other__"
+              ? "Manual name"
+              : option.requiresManualName
+                ? `Driver ID ${option.providerEmployeeId}`
+                : option.providerEmployeeId
           }));
         const collectedAmount = denominations.reduce(
           (total, [name, , amount]) => total + numberValue(entry.denominationCounts[name]) * amount,
@@ -209,10 +216,11 @@ export function AssociateEntryBuilder({
             ? { className: "short", label: "Pending", amount: `₹${currency(Math.abs(difference))}` }
             : { className: "excess", label: "Excess", amount: `₹${currency(difference)}` };
         const isOther = entry.providerEmployeeId === "__other__";
+        const requiresManualName = isOther || Boolean(associate?.requiresManualName);
         const canSave = Boolean(entry.providerEmployeeId)
           && entry.denominationUnlocked
           && (!expectedEdited || entry.remarks.trim())
-          && (!isOther || entry.manualAssociateName.trim());
+          && (!requiresManualName || entry.manualAssociateName.trim());
 
         return (
           <article className="reconciliation-entry-card" key={entry.key}>
@@ -228,17 +236,22 @@ export function AssociateEntryBuilder({
                     required
                   />
                 </label>
-                {isOther ? (
-                  <label>Associate name
+                {requiresManualName ? (
+                  <label>{isOther ? "Associate name" : "Employee name"}
                     <input
                       className="field"
                       name="manual_associate_name"
                       value={entry.manualAssociateName}
                       onChange={(event) => updateRow(entry.key, { manualAssociateName: event.target.value })}
-                      placeholder="Enter associate name"
+                      placeholder={isOther ? "Enter associate name" : "Type employee name"}
                       required
                     />
                   </label>
+                ) : null}
+                {!isOther && requiresManualName && entry.providerEmployeeId ? (
+                  <p className="subtle" style={{ gridColumn: "1 / -1", margin: 0 }}>
+                    Driver ID <code>{entry.providerEmployeeId}</code> — enter the employee name, then count denominations.
+                  </p>
                 ) : null}
                 <label>Expected COD
                   <input
@@ -268,7 +281,11 @@ export function AssociateEntryBuilder({
                   <input type="hidden" name="business_date" value={businessDate} />
                   <input type="hidden" name="location_id" value={locationId} />
                   <input type="hidden" name="station_code" value={stationCode} />
-                  <input type="hidden" name="source_associate_name" value={isOther ? entry.manualAssociateName : (associate?.name ?? "")} />
+                  <input
+                    type="hidden"
+                    name="source_associate_name"
+                    value={requiresManualName ? entry.manualAssociateName : (associate?.name ?? "")}
+                  />
                   <input type="hidden" name="shipment_type" value={associate?.shipmentType ?? "Shipment data"} />
                   <input type="hidden" name="total_delivery" value="0" />
                   <input type="hidden" name="total_activity" value="0" />
