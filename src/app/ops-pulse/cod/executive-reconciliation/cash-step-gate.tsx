@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import {
   createContext,
   useCallback,
@@ -217,6 +218,7 @@ export function useRegisterCashStepRequired(required: CashReconAssociate[], load
 export function ContinueToDriverValidation() {
   const ctx = useContext(CashStepGateContext);
   const [showModal, setShowModal] = useState(false);
+  const router = useRouter();
   if (!ctx) return null;
 
   const { mode, loaded, ready, zeroCashReady, required, missing, step2Href, savedCount } = ctx;
@@ -251,7 +253,9 @@ export function ContinueToDriverValidation() {
             Continue to driver validation →
           </button>
         ) : (
-          <a className="button" href={step2Href}>Continue to driver validation →</a>
+          <button className="button" type="button" onClick={() => router.push(step2Href)}>
+            Continue to driver validation →
+          </button>
         )}
       </div>
       {showModal ? (
@@ -279,6 +283,7 @@ export function DriverValidationNavLink({
 }) {
   const ctx = useContext(CashStepGateContext);
   const [showModal, setShowModal] = useState(false);
+  const router = useRouter();
   const ready = ctx?.ready ?? false;
   const missing = ctx?.missing ?? [];
   const required = ctx?.required ?? [];
@@ -292,7 +297,11 @@ export function DriverValidationNavLink({
         href={ready ? href : lockedHref}
         aria-disabled={!ready}
         onClick={(event) => {
-          if (ready) return;
+          if (ready) {
+            event.preventDefault();
+            router.push(href);
+            return;
+          }
           event.preventDefault();
           if (mode === "cash-recon") setShowModal(true);
         }}
