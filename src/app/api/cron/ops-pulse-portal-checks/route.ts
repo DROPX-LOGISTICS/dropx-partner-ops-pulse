@@ -130,6 +130,7 @@ async function escalateExhaustedRun(run: PortalRun, setting: PortalSetting) {
       notification_type: "SCC validation exhausted",
       title,
       message,
+      status: "Unread",
       email_status: emails.length ? "Pending" : "Skipped"
     });
   }

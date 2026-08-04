@@ -182,6 +182,7 @@ export async function notifyCodManager({
     notification_type: notificationType,
     title,
     message,
+    status: "Unread",
     email_status: recipients.length ? "Pending" : "Skipped",
     created_at: new Date().toISOString()
   }).select("id").single();
