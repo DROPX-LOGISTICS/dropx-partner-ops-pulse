@@ -14,6 +14,12 @@ import {
   moneyValue,
   resolveCashExpected
 } from "@/lib/ops-pulse/cash-recon-types";
+import {
+  driverReconCacheKey,
+  readDriverReconCache,
+  writeDriverReconCache,
+  type DriverReconClientPayload
+} from "@/lib/ops-pulse/driver-recon-client-cache";
 import { AssociateEntryBuilder, type AssociateOption } from "./associate-entry-builder";
 import { useRegisterCashStepRequired } from "./cash-step-gate";
 import { MissingDerPanel } from "./missing-der-panel";
@@ -103,7 +109,6 @@ function enrichCollectCash(
           || associateNamesMatch(shortName, String(row.driverInfo?.name ?? ""));
       });
 
-    // Expected COD = cash-only totalReceived (never MPOS-inclusive paymentInfo.expected when expectedCash exists).
     const expected = api
       ? Number(api.expected) || 0
       : resolveCashExpected({
@@ -143,7 +148,6 @@ function isUnmappedDriverLabel(name: string, shipmentType: string, employeeId: s
   return false;
 }
 
-/** Prefer API missingFromDer; use employeeId (not tasId) as the select/save id when present. */
 function mapMissingFromDer(apiMissing: CashReconAssociate[]): AssociateOption[] {
   const rows = apiMissing
     .filter((row) => String(row.providerEmployeeId ?? "").trim().toLowerCase() !== "__other__")
@@ -198,6 +202,27 @@ function toCashReconAssociate(row: AssociateOption, source: CashReconAssociate["
   };
 }
 
+function applyPayload(
+  payload: DriverReconClientPayload,
+  setters: {
+    setDrivers: (v: CashReconDriver[]) => void;
+    setReconciliation: (v: CashReconRow[]) => void;
+    setApiAssociates: (v: CashReconAssociate[]) => void;
+    setApiMissingFromDer: (v: CashReconAssociate[]) => void;
+    setApiRequired: (v: CashReconAssociate[]) => void;
+    setExpectedCash: (v: ExpectedCashSummary | null) => void;
+    setSessionSource: (v: string | null) => void;
+  }
+) {
+  setters.setDrivers(payload.drivers);
+  setters.setReconciliation(payload.reconciliation);
+  setters.setApiAssociates(payload.associates);
+  setters.setApiMissingFromDer(payload.missingFromDer);
+  setters.setApiRequired(payload.requiredForCashEntry);
+  setters.setExpectedCash(payload.expectedCash);
+  setters.setSessionSource(payload.sessionSource);
+}
+
 export function CashCollectionWorkspace({
   dbAssociates,
   businessDate,
@@ -221,20 +246,41 @@ export function CashCollectionWorkspace({
   stationLabel: string;
   workerConfigured: boolean;
 }) {
-  const [drivers, setDrivers] = useState<CashReconDriver[]>([]);
-  const [reconciliation, setReconciliation] = useState<CashReconRow[]>([]);
-  const [apiAssociates, setApiAssociates] = useState<CashReconAssociate[]>([]);
-  const [apiMissingFromDer, setApiMissingFromDer] = useState<CashReconAssociate[]>([]);
-  const [apiRequired, setApiRequired] = useState<CashReconAssociate[]>([]);
-  const [expectedCash, setExpectedCash] = useState<ExpectedCashSummary | null>(null);
-  const [sessionSource, setSessionSource] = useState<string | null>(null);
+  const baselineKey = useMemo(
+    () => JSON.stringify(
+      dbAssociates.map((row) => row.providerEmployeeId).sort()
+    ),
+    [dbAssociates]
+  );
+
+  const cacheKey = useMemo(
+    () => driverReconCacheKey({ stationCode, businessDate, locationId, baselineKey }),
+    [baselineKey, businessDate, locationId, stationCode]
+  );
+
+  // Sync hydrate from module cache so save/delete remounts never blank the sheet.
+  const initialCache = workerConfigured ? readDriverReconCache(cacheKey) : null;
+
+  const [drivers, setDrivers] = useState<CashReconDriver[]>(() => initialCache?.drivers ?? []);
+  const [reconciliation, setReconciliation] = useState<CashReconRow[]>(() => initialCache?.reconciliation ?? []);
+  const [apiAssociates, setApiAssociates] = useState<CashReconAssociate[]>(() => initialCache?.associates ?? []);
+  const [apiMissingFromDer, setApiMissingFromDer] = useState<CashReconAssociate[]>(() => initialCache?.missingFromDer ?? []);
+  const [apiRequired, setApiRequired] = useState<CashReconAssociate[]>(() => initialCache?.requiredForCashEntry ?? []);
+  const [expectedCash, setExpectedCash] = useState<ExpectedCashSummary | null>(() => initialCache?.expectedCash ?? null);
+  const [sessionSource, setSessionSource] = useState<string | null>(() => initialCache?.sessionSource ?? null);
   const [error, setError] = useState<string | null>(null);
+  /** True only for the first network fetch when there is no cache. */
   const [loading, setLoading] = useState(false);
-  const [loaded, setLoaded] = useState(false);
+  /** Soft background refresh — keeps sheet visible. */
+  const [refreshing, setRefreshing] = useState(false);
+  const [loaded, setLoaded] = useState(() => Boolean(initialCache) || !workerConfigured);
   const [pending, startTransition] = useTransition();
   const requestIdRef = useRef(0);
+  const hydratedKeyRef = useRef<string | null>(initialCache ? cacheKey : null);
+  const baselineRef = useRef<{ providerEmployeeId: string; name: string }[]>([]);
+  const cacheKeyRef = useRef(cacheKey);
+  cacheKeyRef.current = cacheKey;
 
-  // Stable baseline for the worker: DB ids + names only (ignore enriched display changes).
   const baselineAssociates = useMemo(
     () => dbAssociates.map((row) => ({
       providerEmployeeId: row.providerEmployeeId,
@@ -242,17 +288,43 @@ export function CashCollectionWorkspace({
     })),
     [dbAssociates]
   );
-  const baselineKey = useMemo(
-    () => JSON.stringify(baselineAssociates.map((row) => row.providerEmployeeId).sort()),
-    [baselineAssociates]
-  );
+  baselineRef.current = baselineAssociates;
 
-  const load = useCallback(async () => {
+  const setters = useMemo(() => ({
+    setDrivers,
+    setReconciliation,
+    setApiAssociates,
+    setApiMissingFromDer,
+    setApiRequired,
+    setExpectedCash,
+    setSessionSource
+  }), []);
+
+  const fetchDriverRecon = useCallback(async (options?: { force?: boolean; soft?: boolean }) => {
     if (!workerConfigured || !stationCode || !businessDate || !locationId) return;
+    const key = cacheKeyRef.current;
+    const force = Boolean(options?.force);
+    const soft = Boolean(options?.soft);
+
+    if (!force) {
+      const cached = readDriverReconCache(key);
+      if (cached) {
+        applyPayload(cached, setters);
+        setLoaded(true);
+        setError(null);
+        hydratedKeyRef.current = key;
+        return;
+      }
+    }
+
     const requestId = ++requestIdRef.current;
-    setLoading(true);
+    if (soft) setRefreshing(true);
+    else {
+      setLoading(true);
+      if (hydratedKeyRef.current !== key) setLoaded(false);
+    }
     setError(null);
-    setLoaded(false);
+
     try {
       const response = await fetch("/api/ops-pulse/cod/cash-recon/driver-reconciliation", {
         method: "POST",
@@ -261,41 +333,68 @@ export function CashCollectionWorkspace({
           stationCode,
           date: businessDate,
           locationId,
-          baselineAssociates
+          baselineAssociates: baselineRef.current
         })
       });
-      const payload = await response.json().catch(() => ({}));
-      // Ignore stale responses from Strict Mode / remounts (do not abort in-flight worker calls).
+      const body = await response.json().catch(() => ({}));
       if (requestId !== requestIdRef.current) return;
       if (!response.ok) {
-        throw new Error(payload?.error || `Unable to load drivers (${response.status})`);
+        throw new Error(body?.error || `Unable to load drivers (${response.status})`);
       }
-      setDrivers(Array.isArray(payload.drivers) ? payload.drivers : []);
-      setReconciliation(Array.isArray(payload.reconciliation) ? payload.reconciliation : []);
-      setApiAssociates(Array.isArray(payload.associates) ? payload.associates : []);
-      setApiMissingFromDer(Array.isArray(payload.missingFromDer) ? payload.missingFromDer : []);
-      setApiRequired(Array.isArray(payload.requiredForCashEntry) ? payload.requiredForCashEntry : []);
-      setExpectedCash(payload.expectedCash && typeof payload.expectedCash === "object" ? payload.expectedCash : null);
-      setSessionSource(payload.sessionSource == null ? null : String(payload.sessionSource));
+
+      const payload: DriverReconClientPayload = {
+        drivers: Array.isArray(body.drivers) ? body.drivers : [],
+        reconciliation: Array.isArray(body.reconciliation) ? body.reconciliation : [],
+        associates: Array.isArray(body.associates) ? body.associates : [],
+        missingFromDer: Array.isArray(body.missingFromDer) ? body.missingFromDer : [],
+        requiredForCashEntry: Array.isArray(body.requiredForCashEntry) ? body.requiredForCashEntry : [],
+        expectedCash: body.expectedCash && typeof body.expectedCash === "object" ? body.expectedCash : null,
+        sessionSource: body.sessionSource == null ? null : String(body.sessionSource)
+      };
+      writeDriverReconCache(key, payload);
+      applyPayload(payload, setters);
       setLoaded(true);
+      hydratedKeyRef.current = key;
     } catch (err) {
       if (requestId !== requestIdRef.current) return;
-      setDrivers([]);
-      setReconciliation([]);
-      setApiAssociates([]);
-      setApiMissingFromDer([]);
-      setApiRequired([]);
-      setExpectedCash(null);
-      setLoaded(false);
+      if (!soft) {
+        setDrivers([]);
+        setReconciliation([]);
+        setApiAssociates([]);
+        setApiMissingFromDer([]);
+        setApiRequired([]);
+        setExpectedCash(null);
+        setLoaded(false);
+      }
       setError(err instanceof Error ? err.message : "Unable to load cash recon drivers.");
     } finally {
-      if (requestId === requestIdRef.current) setLoading(false);
+      if (requestId === requestIdRef.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
-  }, [baselineAssociates, businessDate, locationId, stationCode, workerConfigured]);
+  }, [businessDate, locationId, setters, stationCode, workerConfigured]);
 
+  // Fetch when station/date/location/baseline IDs change — not on every save remount.
   useEffect(() => {
-    void load();
-  }, [load, baselineKey]);
+    if (!workerConfigured) {
+      setLoaded(true);
+      return;
+    }
+    const cached = readDriverReconCache(cacheKey);
+    if (cached && hydratedKeyRef.current === cacheKey) {
+      return;
+    }
+    if (cached) {
+      applyPayload(cached, setters);
+      setLoaded(true);
+      setError(null);
+      hydratedKeyRef.current = cacheKey;
+      return;
+    }
+    void fetchDriverRecon({ soft: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cacheKey, workerConfigured]);
 
   const enriched = useMemo(
     () => enrichCollectCash(dbAssociates, apiAssociates, drivers, reconciliation, expectedCash),
@@ -327,8 +426,8 @@ export function CashCollectionWorkspace({
 
   useRegisterCashStepRequired(requiredForGate, loaded && !loading && !error);
 
-  // Block cash entry until cash-recon driver denominations have loaded (when worker is configured).
-  const driversReady = !workerConfigured || (loaded && !loading && !pending);
+  const busy = loading || refreshing || pending;
+  const driversReady = !workerConfigured || (loaded && !loading && !error);
   const entryEnabled = canEdit && driversReady;
 
   return (
@@ -341,7 +440,7 @@ export function CashCollectionWorkspace({
             <p className="subtle">Select one driver or add all available drivers, then enter the expected COD and denomination count.</p>
           </div>
           <span className={`status-pill ${loaded ? "good" : error ? "warn" : ""}`}>
-            {loading || pending ? "Loading…" : loaded ? `${enriched.length} available` : "Idle"}
+            {busy ? (loaded ? "Updating…" : "Loading…") : loaded ? `${enriched.length} available` : "Idle"}
           </span>
         </div>
         <div className="panel-body reconciliation-cash-source">
@@ -352,7 +451,7 @@ export function CashCollectionWorkspace({
                 {loaded
                   ? `${enriched.length} drivers loaded · ${requiredForGate.length} with expected &gt; 0 · ${savedCount} cash rows saved${sessionSource ? ` · ${sessionSource}` : ""}`
                   : workerConfigured
-                    ? (loading || pending
+                    ? (busy
                       ? "Fetching driver reconciliation from cash recon worker…"
                       : "Driver list not loaded yet — click Refresh drivers.")
                     : `${enriched.length} drivers loaded · ${savedCount} cash rows saved`}
@@ -361,10 +460,10 @@ export function CashCollectionWorkspace({
             <button
               className="button secondary"
               type="button"
-              disabled={!workerConfigured || !canEdit || loading || pending}
-              onClick={() => startTransition(() => { void load(); })}
+              disabled={!workerConfigured || !canEdit || busy}
+              onClick={() => startTransition(() => { void fetchDriverRecon({ force: true, soft: true }); })}
             >
-              {loading || pending ? "Refreshing…" : "Refresh drivers"}
+              {busy ? "Refreshing…" : "Refresh drivers"}
             </button>
           </div>
           {!workerConfigured ? (
@@ -400,7 +499,7 @@ export function CashCollectionWorkspace({
         {workerConfigured && !driversReady ? (
           <div className="panel-body">
             <p className="subtle">
-              {loading || pending
+              {busy
                 ? "Loading cash-recon driver list. Collect cash stays idle until denominations are ready."
                 : error
                   ? "Fix the load error above, then click Refresh drivers."

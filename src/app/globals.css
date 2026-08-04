@@ -4170,6 +4170,38 @@ h3 {
   animation: spin 0.75s linear infinite;
 }
 
+.nav-progress {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 9999;
+  height: 2px;
+  width: 100%;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, var(--brand-red, #c62828), transparent);
+  transform-origin: left center;
+  opacity: 0.95;
+}
+
+.nav-progress.is-active {
+  animation: nav-progress-indeterminate 1.1s ease-in-out infinite;
+}
+
+.nav-progress.is-done {
+  animation: nav-progress-finish 0.28s ease-out forwards;
+}
+
+@keyframes nav-progress-indeterminate {
+  0% { transform: scaleX(0.08) translateX(-20%); }
+  50% { transform: scaleX(0.45) translateX(40%); }
+  100% { transform: scaleX(0.08) translateX(120%); }
+}
+
+@keyframes nav-progress-finish {
+  from { transform: scaleX(1); opacity: 0.95; }
+  to { transform: scaleX(1); opacity: 0; }
+}
+
 @keyframes spin {
   to {
     transform: rotate(360deg);
