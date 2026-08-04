@@ -364,6 +364,7 @@ export default async function ExecutiveReconciliationPage(props: { searchParams?
               canEdit={permission.canEdit && !selectedClosure?.is_final_submitted}
               locationId={defaultLocationId}
               returnHref={returnHref}
+              savedProviderEmployeeIds={savedProviderEmployeeIds}
               savedCount={savedRows.length}
               stationCode={selectedStation.station_code}
               stationLabel={selectedStation.station_name ?? selectedStation.state ?? ""}

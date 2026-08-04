@@ -7,6 +7,7 @@ export function MissingDerPanel({
   businessDate,
   canEdit,
   driversReady = true,
+  initiallyHiddenProviderIds = [],
   locationId,
   returnHref,
   stationCode,
@@ -16,6 +17,7 @@ export function MissingDerPanel({
   businessDate: string;
   canEdit: boolean;
   driversReady?: boolean;
+  initiallyHiddenProviderIds?: string[];
   locationId: string;
   returnHref: string;
   stationCode: string;
@@ -42,6 +44,7 @@ export function MissingDerPanel({
               associates={associates}
               businessDate={businessDate}
               canEdit={canEdit}
+              initiallyHiddenProviderIds={initiallyHiddenProviderIds}
               locationId={locationId}
               returnHref={returnHref}
               stationCode={stationCode}

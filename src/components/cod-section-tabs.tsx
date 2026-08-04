@@ -12,7 +12,7 @@ export function CodSectionTabs({ active }: { active: typeof codSections[number][
   return (
     <section className="tabs" aria-label="COD sections">
       {codSections.filter((section) => section.visible).map((section) => (
-        <Link className={`tab ${active === section.key ? "active" : ""}`} href={section.href} key={section.key}>
+        <Link className={`tab ${active === section.key ? "active" : ""}`} href={section.href} key={section.key} prefetch={false}>
           {section.label}
         </Link>
       ))}

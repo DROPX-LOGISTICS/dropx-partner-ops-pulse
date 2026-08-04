@@ -230,6 +230,7 @@ export function CashCollectionWorkspace({
   canEdit,
   locationId,
   returnHref,
+  savedProviderEmployeeIds,
   savedCount,
   stationCode,
   stationLabel,
@@ -241,6 +242,7 @@ export function CashCollectionWorkspace({
   canEdit: boolean;
   locationId: string;
   returnHref: string;
+  savedProviderEmployeeIds: string[];
   savedCount: number;
   stationCode: string;
   stationLabel: string;
@@ -525,6 +527,7 @@ export function CashCollectionWorkspace({
             associates={enriched}
             businessDate={businessDate}
             canEdit={entryEnabled}
+            initiallyHiddenProviderIds={savedProviderEmployeeIds}
             locationId={locationId}
             returnHref={returnHref}
             stationCode={stationCode}
@@ -544,6 +547,7 @@ export function CashCollectionWorkspace({
           businessDate={businessDate}
           canEdit={entryEnabled}
           driversReady={driversReady}
+          initiallyHiddenProviderIds={savedProviderEmployeeIds}
           locationId={locationId}
           returnHref={returnHref}
           stationCode={stationCode}

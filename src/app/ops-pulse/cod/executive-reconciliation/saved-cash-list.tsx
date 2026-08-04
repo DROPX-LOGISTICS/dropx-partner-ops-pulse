@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { StatusPill } from "@/components/status-pill";
 import {
@@ -123,16 +123,21 @@ export function SavedCashList({
   returnHref: string;
 }) {
   const router = useRouter();
-  const [isPending, startTransition] = useTransition();
+  const [, startTransition] = useTransition();
   const [activeKey, setActiveKey] = useState<string | null>(null);
   const [activeAction, setActiveAction] = useState<"update" | "delete" | null>(null);
   const [errorByKey, setErrorByKey] = useState<Record<string, string>>({});
+  const [localRows, setLocalRows] = useState(rows);
+
+  useEffect(() => {
+    setLocalRows(rows);
+  }, [rows]);
 
   return (
     <div className="reconciliation-entry-list reconciliation-saved-list" aria-label="Executive reconciliation sheet">
-      {rows.length ? rows.map((row) => {
+      {localRows.length ? localRows.map((row) => {
         const difference = amountValue(row.difference_amount);
-        const rowPending = activeKey === row.key && isPending;
+        const rowPending = activeKey === row.key;
         const rowError = errorByKey[row.key];
         return (
           <article className="reconciliation-entry-card" key={row.key}>
@@ -146,16 +151,24 @@ export function SavedCashList({
                 setErrorByKey((current) => ({ ...current, [row.key]: "" }));
                 setActiveKey(row.key);
                 setActiveAction("update");
-                startTransition(async () => {
-                  const result = await saveExecutiveReconciliation(formData);
-                  if (result?.ok) {
-                    router.refresh();
-                    return;
+                void (async () => {
+                  try {
+                    const result = await saveExecutiveReconciliation(formData);
+                    if (result?.ok) {
+                      setActiveKey(null);
+                      setActiveAction(null);
+                      startTransition(() => router.refresh());
+                      return;
+                    }
+                    setErrorByKey((current) => ({ ...current, [row.key]: result?.error ?? "Unable to update cash entry." }));
+                    setActiveKey(null);
+                    setActiveAction(null);
+                  } catch (error) {
+                    setErrorByKey((current) => ({ ...current, [row.key]: error instanceof Error ? error.message : "Unable to update cash entry." }));
+                    setActiveKey(null);
+                    setActiveAction(null);
                   }
-                  setErrorByKey((current) => ({ ...current, [row.key]: result?.error ?? "Unable to update cash entry." }));
-                  setActiveKey(null);
-                  setActiveAction(null);
-                });
+                })();
               }}
             >
               <div className="reconciliation-entry-grid reconciliation-saved-grid">
@@ -200,16 +213,25 @@ export function SavedCashList({
                       setErrorByKey((current) => ({ ...current, [row.key]: "" }));
                       setActiveKey(row.key);
                       setActiveAction("delete");
-                      startTransition(async () => {
-                        const result = await deleteExecutiveReconciliation(formData);
-                        if (result?.ok) {
-                          router.refresh();
-                          return;
+                      void (async () => {
+                        try {
+                          const result = await deleteExecutiveReconciliation(formData);
+                          if (result?.ok) {
+                            setLocalRows((current) => current.filter((item) => item.key !== row.key));
+                            setActiveKey(null);
+                            setActiveAction(null);
+                            startTransition(() => router.refresh());
+                            return;
+                          }
+                          setErrorByKey((current) => ({ ...current, [row.key]: result?.error ?? "Unable to delete cash entry." }));
+                          setActiveKey(null);
+                          setActiveAction(null);
+                        } catch (error) {
+                          setErrorByKey((current) => ({ ...current, [row.key]: error instanceof Error ? error.message : "Unable to delete cash entry." }));
+                          setActiveKey(null);
+                          setActiveAction(null);
                         }
-                        setErrorByKey((current) => ({ ...current, [row.key]: result?.error ?? "Unable to delete cash entry." }));
-                        setActiveKey(null);
-                        setActiveAction(null);
-                      });
+                      })();
                     }}
                     type="button"
                   >

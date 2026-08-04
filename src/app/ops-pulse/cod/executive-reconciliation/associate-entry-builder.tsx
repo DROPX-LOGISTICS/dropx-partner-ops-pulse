@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { SearchableSelect } from "@/components/searchable-select";
 import type { CashReconPendingBreakdown } from "@/lib/ops-pulse/cash-recon-types";
@@ -78,7 +78,8 @@ export function AssociateEntryBuilder({
   returnHref,
   stationCode,
   stationLabel,
-  emptyHint
+  emptyHint,
+  initiallyHiddenProviderIds = []
 }: {
   associates: AssociateOption[];
   businessDate: string;
@@ -88,9 +89,10 @@ export function AssociateEntryBuilder({
   stationCode: string;
   stationLabel: string;
   emptyHint?: string;
+  initiallyHiddenProviderIds?: string[];
 }) {
   const router = useRouter();
-  const [isPending, startTransition] = useTransition();
+  const [, startTransition] = useTransition();
   const [rows, setRows] = useState<EntryRow[]>([{
     key: 1,
     providerEmployeeId: "",
@@ -106,10 +108,17 @@ export function AssociateEntryBuilder({
   const [pendingModalKey, setPendingModalKey] = useState<number | null>(null);
   const [submittingKey, setSubmittingKey] = useState<number | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [hiddenProviderIds, setHiddenProviderIds] = useState<string[]>(
+    () => initiallyHiddenProviderIds.map((value) => value.trim().toUpperCase()).filter(Boolean)
+  );
   const optionMap = useMemo(
     () => new Map(associates.map((associate) => [associate.providerEmployeeId, associate])),
     [associates]
   );
+
+  useEffect(() => {
+    setHiddenProviderIds(initiallyHiddenProviderIds.map((value) => value.trim().toUpperCase()).filter(Boolean));
+  }, [initiallyHiddenProviderIds]);
 
   function resetRow(key: number) {
     setRows((current) => {
@@ -150,7 +159,10 @@ export function AssociateEntryBuilder({
   }
 
   function addAllDrivers() {
-    setRows(associates.filter((row) => row.providerEmployeeId !== "__other__").map((associate, index) => {
+    setRows(associates.filter((row) => {
+      const id = row.providerEmployeeId.trim().toUpperCase();
+      return row.providerEmployeeId !== "__other__" && !hiddenProviderIds.includes(id);
+    }).map((associate, index) => {
       const pending = Number(associate.pendingRecon) > 0.01;
       return {
         key: index + 1,
@@ -214,7 +226,14 @@ export function AssociateEntryBuilder({
           rows.filter((row) => row.key !== entry.key).map((row) => row.providerEmployeeId).filter(Boolean)
         );
         const associateOptions = associates
-          .filter((option) => option.providerEmployeeId === entry.providerEmployeeId || option.providerEmployeeId === "__other__" || !selectedByOtherRow.has(option.providerEmployeeId))
+          .filter((option) => {
+            const optionId = option.providerEmployeeId.trim().toUpperCase();
+            const selectedHere = option.providerEmployeeId === entry.providerEmployeeId;
+            const available = option.providerEmployeeId === "__other__"
+              || selectedHere
+              || (!selectedByOtherRow.has(option.providerEmployeeId) && !hiddenProviderIds.includes(optionId));
+            return available;
+          })
           .map((option) => ({
             value: option.providerEmployeeId,
             label: option.name,
@@ -245,7 +264,7 @@ export function AssociateEntryBuilder({
           && entry.denominationUnlocked
           && (!expectedEdited || entry.remarks.trim())
           && (!requiresManualName || entry.manualAssociateName.trim());
-        const rowPending = submittingKey === entry.key && isPending;
+        const rowPending = submittingKey === entry.key;
 
         return (
           <article className="reconciliation-entry-card" key={entry.key}>
@@ -259,16 +278,26 @@ export function AssociateEntryBuilder({
                 formData.set("response_mode", "client");
                 setSubmitError(null);
                 setSubmittingKey(entry.key);
-                startTransition(async () => {
-                  const result = await saveExecutiveReconciliation(formData);
-                  if (result?.ok) {
-                    resetRow(entry.key);
-                    router.refresh();
-                    return;
+                void (async () => {
+                  try {
+                    const result = await saveExecutiveReconciliation(formData);
+                    if (result?.ok) {
+                      const savedId = String(formData.get("provider_employee_id") ?? "").trim().toUpperCase();
+                      if (savedId && savedId !== "__OTHER__") {
+                        setHiddenProviderIds((current) => current.includes(savedId) ? current : [...current, savedId]);
+                      }
+                      resetRow(entry.key);
+                      setSubmittingKey(null);
+                      startTransition(() => router.refresh());
+                      return;
+                    }
+                    setSubmitError(result?.error ?? "Unable to save cash entry.");
+                    setSubmittingKey(null);
+                  } catch (error) {
+                    setSubmitError(error instanceof Error ? error.message : "Unable to save cash entry.");
+                    setSubmittingKey(null);
                   }
-                  setSubmitError(result?.error ?? "Unable to save cash entry.");
-                  setSubmittingKey(null);
-                });
+                })();
               }}
             >
               <div className="reconciliation-entry-grid">

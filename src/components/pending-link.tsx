@@ -59,9 +59,7 @@ export function PendingLink({
       className={`${className ?? ""} ${loading ? "loading" : ""} ${isCurrent ? "current disabled-current" : ""}`.trim()}
       href={href}
       onClick={handleClick}
-      onFocus={() => router.prefetch(href)}
-      onMouseEnter={() => router.prefetch(href)}
-      prefetch
+      prefetch={false}
       scroll={scroll}
       title={title}
     >
