@@ -140,6 +140,7 @@ export function CashStepGateProvider({
   const [loaded, setLoaded] = useState(mode !== "cash-recon" || initialRequired.length > 0);
   const [required, setRequired] = useState<CashReconAssociate[]>(initialRequired);
   const [zeroCashReady, setZeroCashReady] = useState(false);
+  const [clientSavedEntries, setClientSavedEntries] = useState<SavedCashEntry[]>(savedEntries);
 
   const registerRequired = useCallback((nextRequired: CashReconAssociate[], isLoaded: boolean, isZeroCashReady: boolean) => {
     setRequired(nextRequired);
@@ -147,18 +148,52 @@ export function CashStepGateProvider({
     setZeroCashReady(isZeroCashReady);
   }, []);
 
+  useEffect(() => {
+    setClientSavedEntries(savedEntries);
+  }, [savedEntries]);
+
+  useEffect(() => {
+    function handleSaved(event: Event) {
+      const detail = (event as CustomEvent<{ provider_employee_id?: string | null; source_associate_name?: string | null; manual_associate_name?: string | null }>).detail;
+      const providerEmployeeId = String(detail?.provider_employee_id ?? "").trim();
+      if (!providerEmployeeId) return;
+      const name = String(detail?.source_associate_name ?? detail?.manual_associate_name ?? "").trim() || null;
+      setClientSavedEntries((current) => {
+        const next = current.filter((row) => row.providerEmployeeId.trim().toUpperCase() !== providerEmployeeId.toUpperCase());
+        next.push({ providerEmployeeId, name });
+        return next;
+      });
+    }
+
+    function handleDeleted(event: Event) {
+      const detail = (event as CustomEvent<{ provider_employee_id?: string | null }>).detail;
+      const providerEmployeeId = String(detail?.provider_employee_id ?? "").trim();
+      if (!providerEmployeeId) return;
+      setClientSavedEntries((current) => current.filter((row) => row.providerEmployeeId.trim().toUpperCase() !== providerEmployeeId.toUpperCase()));
+    }
+
+    window.addEventListener("executive-reconciliation:saved", handleSaved as EventListener);
+    window.addEventListener("executive-reconciliation:deleted", handleDeleted as EventListener);
+    return () => {
+      window.removeEventListener("executive-reconciliation:saved", handleSaved as EventListener);
+      window.removeEventListener("executive-reconciliation:deleted", handleDeleted as EventListener);
+    };
+  }, []);
+
   const missing = useMemo(
-    () => missingRequiredCashEntries(required, savedEntries),
-    [required, savedEntries]
+    () => missingRequiredCashEntries(required, clientSavedEntries),
+    [required, clientSavedEntries]
   );
 
+  const currentSavedCount = clientSavedEntries.length;
+
   const ready = mode === "legacy"
-    ? savedCount > 0
+    ? currentSavedCount > 0
     : Boolean(loaded && ((required.length > 0 && missing.length === 0) || zeroCashReady));
 
   const value = useMemo(
-    () => ({ mode, loaded, ready, zeroCashReady, required, missing, step2Href, savedCount, registerRequired }),
-    [mode, loaded, ready, zeroCashReady, required, missing, step2Href, savedCount, registerRequired]
+    () => ({ mode, loaded, ready, zeroCashReady, required, missing, step2Href, savedCount: currentSavedCount, registerRequired }),
+    [mode, loaded, ready, zeroCashReady, required, missing, step2Href, currentSavedCount, registerRequired]
   );
 
   return <CashStepGateContext.Provider value={value}>{children}</CashStepGateContext.Provider>;

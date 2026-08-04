@@ -65,6 +65,13 @@ function currency(value: number) {
   return value.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+function optimisticStatus(expectedAmount: number, collectedAmount: number) {
+  if (expectedAmount === 0 && collectedAmount === 0) return "Pending";
+  const difference = Number((collectedAmount - expectedAmount).toFixed(2));
+  if (Math.abs(difference) < 0.01) return "Completed";
+  return difference < 0 ? "Pending Amount" : "Mismatch";
+}
+
 function expectedPrefill(associate: AssociateOption | undefined) {
   const value = Number(associate?.expectedAmount ?? associate?.pendingAmount ?? 0);
   return value > 0 ? String(value) : "";
@@ -283,6 +290,45 @@ export function AssociateEntryBuilder({
                     const result = await saveExecutiveReconciliation(formData);
                     if (result?.ok) {
                       const savedId = String(formData.get("provider_employee_id") ?? "").trim().toUpperCase();
+                      const associateName = requiresManualName
+                        ? entry.manualAssociateName.trim()
+                        : (associate?.name ?? "").trim();
+                      window.dispatchEvent(new CustomEvent("executive-reconciliation:saved", {
+                        detail: {
+                          key: `optimistic:${savedId || entry.key}:${Date.now()}`,
+                          reconciliation_id: null,
+                          business_date: businessDate,
+                          location_id: locationId,
+                          station_code: stationCode,
+                          provider_employee_id: String(formData.get("provider_employee_id") ?? ""),
+                          source_associate_name: associateName || null,
+                          manual_associate_name: requiresManualName ? associateName || null : null,
+                          shipment_type: associate?.shipmentType ?? "Shipment data",
+                          total_delivery: 0,
+                          total_activity: 0,
+                          reconciliation_status: optimisticStatus(expectedAmount, collectedAmount),
+                          pending_amount: Math.max(0, Number((expectedAmount - collectedAmount).toFixed(2))),
+                          expected_amount: expectedAmount,
+                          cash_500_count: numberValue(entry.denominationCounts.cash_500_count),
+                          cash_200_count: numberValue(entry.denominationCounts.cash_200_count),
+                          cash_100_count: numberValue(entry.denominationCounts.cash_100_count),
+                          cash_50_count: numberValue(entry.denominationCounts.cash_50_count),
+                          cash_20_count: numberValue(entry.denominationCounts.cash_20_count),
+                          cash_10_count: numberValue(entry.denominationCounts.cash_10_count),
+                          cash_other_amount: numberValue(entry.cashOtherAmount),
+                          collected_amount: collectedAmount,
+                          difference_amount: Number((collectedAmount - expectedAmount).toFixed(2)),
+                          remarks: entry.remarks || null,
+                          scc_pending_amount: associate?.pendingRecon ?? 0,
+                          scc_pending_details: null,
+                          scc_last_detail_checked_at: null,
+                          scc_raw_row: null,
+                          source_updated_at: null,
+                          updated_at: new Date().toISOString(),
+                          source: requiresManualName ? "manual" : "shipment_data",
+                          optimisticSync: true
+                        }
+                      }));
                       if (savedId && savedId !== "__OTHER__") {
                         setHiddenProviderIds((current) => current.includes(savedId) ? current : [...current, savedId]);
                       }

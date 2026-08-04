@@ -11,6 +11,10 @@ import {
 } from "@/lib/ops-pulse/cod";
 import { deleteExecutiveReconciliation, saveExecutiveReconciliation } from "./cash-entry-actions";
 
+type OptimisticSavedCashRow = ExecutiveReconciliationViewRow & {
+  optimisticSync?: boolean;
+};
+
 const denominations = [
   ["cash_500_count", "500"],
   ["cash_200_count", "200"],
@@ -128,14 +132,47 @@ export function SavedCashList({
   const [activeAction, setActiveAction] = useState<"update" | "delete" | null>(null);
   const [errorByKey, setErrorByKey] = useState<Record<string, string>>({});
   const [localRows, setLocalRows] = useState(rows);
+  const [optimisticRows, setOptimisticRows] = useState<OptimisticSavedCashRow[]>([]);
 
   useEffect(() => {
     setLocalRows(rows);
+    setOptimisticRows((current) => current.filter((row) => !rows.some((serverRow) =>
+      serverRow.business_date === row.business_date
+      && serverRow.location_id === row.location_id
+      && serverRow.provider_employee_id === row.provider_employee_id
+    )));
   }, [rows]);
+
+  useEffect(() => {
+    function handleSaved(event: Event) {
+      const detail = (event as CustomEvent<OptimisticSavedCashRow>).detail;
+      if (!detail) return;
+      setOptimisticRows((current) => {
+        const filtered = current.filter((row) => !(
+          row.business_date === detail.business_date
+          && row.location_id === detail.location_id
+          && row.provider_employee_id === detail.provider_employee_id
+        ));
+        return [detail, ...filtered];
+      });
+    }
+
+    window.addEventListener("executive-reconciliation:saved", handleSaved as EventListener);
+    return () => window.removeEventListener("executive-reconciliation:saved", handleSaved as EventListener);
+  }, []);
+
+  const displayRows: OptimisticSavedCashRow[] = [
+    ...optimisticRows.filter((row) => !localRows.some((serverRow) =>
+      serverRow.business_date === row.business_date
+      && serverRow.location_id === row.location_id
+      && serverRow.provider_employee_id === row.provider_employee_id
+    )),
+    ...localRows
+  ];
 
   return (
     <div className="reconciliation-entry-list reconciliation-saved-list" aria-label="Executive reconciliation sheet">
-      {localRows.length ? localRows.map((row) => {
+      {displayRows.length ? displayRows.map((row) => {
         const difference = amountValue(row.difference_amount);
         const rowPending = activeKey === row.key;
         const rowError = errorByKey[row.key];
@@ -197,12 +234,12 @@ export function SavedCashList({
                   <input type="hidden" name="shipment_type" value={row.shipment_type ?? ""} />
                   <input type="hidden" name="total_delivery" value={String(row.total_delivery ?? 0)} />
                   <input type="hidden" name="total_activity" value={String(row.total_activity ?? 0)} />
-                  <button className="button secondary" disabled={!canEdit || isFinalSubmitted || rowPending} type="submit">
+                  <button className="button secondary" disabled={!canEdit || isFinalSubmitted || rowPending || Boolean(row.optimisticSync)} type="submit">
                     {rowPending && activeAction === "update" ? "Updating..." : "Update"}
                   </button>
                   <button
                     className="button ghost"
-                    disabled={!canEdit || isFinalSubmitted || rowPending}
+                    disabled={!canEdit || isFinalSubmitted || rowPending || Boolean(row.optimisticSync)}
                     onClick={(event) => {
                       event.preventDefault();
                       if (!window.confirm(`Delete saved cash entry for ${executiveDisplayName(row)}?`)) return;
@@ -217,7 +254,13 @@ export function SavedCashList({
                         try {
                           const result = await deleteExecutiveReconciliation(formData);
                           if (result?.ok) {
+                            window.dispatchEvent(new CustomEvent("executive-reconciliation:deleted", {
+                              detail: {
+                                provider_employee_id: row.provider_employee_id
+                              }
+                            }));
                             setLocalRows((current) => current.filter((item) => item.key !== row.key));
+                            setOptimisticRows((current) => current.filter((item) => item.key !== row.key));
                             setActiveKey(null);
                             setActiveAction(null);
                             startTransition(() => router.refresh());
@@ -260,6 +303,9 @@ export function SavedCashList({
                   <strong>{differenceLabel(difference)}</strong>
                 </span>
               </div>
+              {row.optimisticSync ? (
+                <p className="subtle" style={{ marginTop: 8 }}>Syncing saved cash to the server...</p>
+              ) : null}
               {rowError ? <p className="subtle" style={{ color: "#b42318", marginTop: 8 }}>{rowError}</p> : null}
             </form>
           </article>
