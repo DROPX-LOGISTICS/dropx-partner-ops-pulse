@@ -23,7 +23,7 @@ export function isCashReconWorkerConfigured() {
   return Boolean(baseUrl && adminKey);
 }
 
-async function postWorker<T>(path: string, body: { stationCode: string; date: string }): Promise<T> {
+async function postWorkerOnce<T>(path: string, body: { stationCode: string; date: string }): Promise<T> {
   const { baseUrl, adminKey } = workerConfig();
   if (!baseUrl || !adminKey) {
     throw new Error("Cash recon worker is not configured. Set CASH_RECON_WORKER_URL and CASH_RECON_ADMIN_KEY.");
@@ -60,6 +60,25 @@ async function postWorker<T>(path: string, body: { stationCode: string; date: st
   }
 
   return payload as T;
+}
+
+function isTransientPortalSessionError(message: string) {
+  const normalized = message.toLowerCase();
+  return normalized.includes("session expired")
+    || normalized.includes("unauthorized")
+    || normalized.includes("not authenticated");
+}
+
+async function postWorker<T>(path: string, body: { stationCode: string; date: string }): Promise<T> {
+  try {
+    return await postWorkerOnce<T>(path, body);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    // First hit after idle often races Amazon portal login; one retry usually succeeds.
+    if (!isTransientPortalSessionError(message)) throw error;
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    return postWorkerOnce<T>(path, body);
+  }
 }
 
 type RawDriverReconciliation = {

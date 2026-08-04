@@ -234,6 +234,7 @@ export function AssociateEntryBuilder({
                     onValueChange={(value) => selectAssociate(entry.key, value)}
                     placeholder="Search DA name or ID"
                     required
+                    disabled={!canEdit}
                   />
                 </label>
                 {requiresManualName ? (
@@ -245,6 +246,7 @@ export function AssociateEntryBuilder({
                       onChange={(event) => updateRow(entry.key, { manualAssociateName: event.target.value })}
                       placeholder={isOther ? "Enter associate name" : "Type employee name"}
                       required
+                      disabled={!canEdit}
                     />
                   </label>
                 ) : null}
@@ -264,6 +266,7 @@ export function AssociateEntryBuilder({
                     })}
                     inputMode="decimal"
                     placeholder="₹ 0"
+                    disabled={!canEdit}
                   />
                 </label>
                 <label>Remarks
@@ -274,6 +277,7 @@ export function AssociateEntryBuilder({
                     onChange={(event) => updateRow(entry.key, { remarks: event.target.value })}
                     placeholder={expectedEdited ? "Required — why expected was changed" : "Optional note"}
                     required={expectedEdited || Boolean(entry.pendingOverrideRemarks)}
+                    disabled={!canEdit}
                   />
                 </label>
                 <div className="reconciliation-row-actions">
@@ -321,6 +325,7 @@ export function AssociateEntryBuilder({
                           onChange={(event) => updateDenomination(entry.key, name, event.target.value)}
                           inputMode="numeric"
                           placeholder="0"
+                          disabled={!canEdit}
                         />
                       </label>
                     ))}
@@ -332,6 +337,7 @@ export function AssociateEntryBuilder({
                         onChange={(event) => updateRow(entry.key, { cashOtherAmount: event.target.value })}
                         inputMode="decimal"
                         placeholder="0"
+                        disabled={!canEdit}
                       />
                     </label>
                   </div>

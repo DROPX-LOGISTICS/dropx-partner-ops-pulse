@@ -252,6 +252,7 @@ export function CashCollectionWorkspace({
     const requestId = ++requestIdRef.current;
     setLoading(true);
     setError(null);
+    setLoaded(false);
     try {
       const response = await fetch("/api/ops-pulse/cod/cash-recon/driver-reconciliation", {
         method: "POST",
@@ -340,7 +341,7 @@ export function CashCollectionWorkspace({
             <p className="subtle">Select one driver or add all available drivers, then enter the expected COD and denomination count.</p>
           </div>
           <span className={`status-pill ${loaded ? "good" : error ? "warn" : ""}`}>
-            {loading || pending ? "Loading…" : `${enriched.length} available`}
+            {loading || pending ? "Loading…" : loaded ? `${enriched.length} available` : "Idle"}
           </span>
         </div>
         <div className="panel-body reconciliation-cash-source">
@@ -351,7 +352,9 @@ export function CashCollectionWorkspace({
                 {loaded
                   ? `${enriched.length} drivers loaded · ${requiredForGate.length} with expected &gt; 0 · ${savedCount} cash rows saved${sessionSource ? ` · ${sessionSource}` : ""}`
                   : workerConfigured
-                    ? "Fetching driver reconciliation from cash recon worker…"
+                    ? (loading || pending
+                      ? "Fetching driver reconciliation from cash recon worker…"
+                      : "Driver list not loaded yet — click Refresh drivers.")
                     : `${enriched.length} drivers loaded · ${savedCount} cash rows saved`}
               </span>
             </div>
@@ -392,9 +395,19 @@ export function CashCollectionWorkspace({
                 : "Select associate, count denominations and save."}
             </p>
           </div>
-          <span className="count-badge">{enriched.length} available</span>
+          <span className="count-badge">{driversReady ? `${enriched.length} available` : "—"}</span>
         </div>
-        {enriched.length || loading || pending ? (
+        {workerConfigured && !driversReady ? (
+          <div className="panel-body">
+            <p className="subtle">
+              {loading || pending
+                ? "Loading cash-recon driver list. Collect cash stays idle until denominations are ready."
+                : error
+                  ? "Fix the load error above, then click Refresh drivers."
+                  : "Waiting for cash-recon driver list…"}
+            </p>
+          </div>
+        ) : enriched.length ? (
           <AssociateEntryBuilder
             associates={enriched}
             businessDate={businessDate}
@@ -403,13 +416,7 @@ export function CashCollectionWorkspace({
             returnHref={returnHref}
             stationCode={stationCode}
             stationLabel={stationLabel}
-            emptyHint={
-              !driversReady && workerConfigured
-                ? "Waiting for driver denominations…"
-                : loading || pending
-                  ? "Loading associates…"
-                  : "No shipment associates found for this station yet."
-            }
+            emptyHint="No shipment associates found for this station yet."
           />
         ) : (
           <div className="panel-body">
