@@ -32,7 +32,11 @@ import { loadCodDayClosures, loadCodManagerNotifications } from "@/lib/ops-pulse
 import { canAccessCodAudit, loadCodAuditRows } from "@/lib/ops-pulse/cod-audit";
 import { PortalCheckProgress } from "./portal-check-progress";
 import { resolveOperatingContext } from "@/lib/ops-pulse/operating-context";
-import { expectedFromCashReconRaw, type CashReconAssociate } from "@/lib/ops-pulse/cash-recon-types";
+import {
+  expectedFromCashReconRaw,
+  missingRequiredCashEntries,
+  type CashReconAssociate
+} from "@/lib/ops-pulse/cash-recon-types";
 import { CashSubmissionButton } from "./cash-submission-button";
 import { CashCollectionWorkspace } from "./cash-collection-workspace";
 import {
@@ -231,11 +235,12 @@ export default async function ExecutiveReconciliationPage(props: { searchParams?
   const savedProviderEmployeeIds = savedRows
     .map((row) => String(row.provider_employee_id ?? "").trim())
     .filter(Boolean);
-  const savedIdSet = new Set(savedProviderEmployeeIds.map((id) => id.toUpperCase()));
-  const rosterSynced = rows.some((row) => {
-    const raw = row.scc_raw_row as Record<string, unknown> | null;
-    return raw?.source === "cash_recon_worker";
-  });
+  const gateSavedEntries = savedRows.map((row) => ({
+    providerEmployeeId: String(row.provider_employee_id ?? "").trim(),
+    name: executiveDisplayName(row)
+  }));
+  // Prefer cash-recon worker rows when present; also treat saved expected>0 rows as required
+  // so unmapped / Missing-DER saves unlock Step 2 even when the DB roster was never stamped.
   const requiredFromRoster = rows.filter((row) => {
     const id = String(row.provider_employee_id ?? "").trim();
     if (!id || id === "__other__") return false;
@@ -243,21 +248,29 @@ export default async function ExecutiveReconciliationPage(props: { searchParams?
     if (raw?.source !== "cash_recon_worker") return false;
     return expectedFromCashReconRaw(raw) > 0.01;
   });
-  const initialRequiredAssociates: CashReconAssociate[] = requiredFromRoster.map((row) => ({
+  const requiredFromSaved = savedRows.filter((row) => {
+    const id = String(row.provider_employee_id ?? "").trim();
+    return id && id !== "__other__" && amountValue(row.expected_amount) > 0.01;
+  });
+  const requiredSource = requiredFromRoster.length ? requiredFromRoster : requiredFromSaved;
+  const initialRequiredAssociates: CashReconAssociate[] = requiredSource.map((row) => ({
     providerEmployeeId: String(row.provider_employee_id ?? "").trim(),
     name: String(row.source_associate_name ?? "").trim() || executiveDisplayName(row),
     displayName: String(row.source_associate_name ?? "").trim() || executiveDisplayName(row),
     employeeId: null,
-    expected: expectedFromCashReconRaw(row.scc_raw_row as Record<string, unknown> | null),
+    expected: requiredFromRoster.length
+      ? expectedFromCashReconRaw(row.scc_raw_row as Record<string, unknown> | null)
+      : amountValue(row.expected_amount),
     pendingRecon: amountValue(row.scc_pending_amount ?? row.pending_amount),
     breakdown: [],
     source: "matched",
-    shipmentType: "Shipment data"
+    shipmentType: String(row.shipment_type ?? "Shipment data")
   }));
+  const missingServerRequired = missingRequiredCashEntries(initialRequiredAssociates, gateSavedEntries);
+  // Match client gate: all required cash entered, or no required list + navigating to step 2 (zero-cash day).
   const cashReady = cashReconReady
-    ? rosterSynced
-      && requiredFromRoster.length > 0
-      && requiredFromRoster.every((row) => savedIdSet.has(String(row.provider_employee_id).trim().toUpperCase()))
+    ? missingServerRequired.length === 0
+      && (initialRequiredAssociates.length > 0 || savedRows.length > 0 || requestedStep >= 2)
     : savedRows.length > 0;
   const activeStep = requestedStep >= 3 && !driverCleared
     ? cashReady ? 2 : 1

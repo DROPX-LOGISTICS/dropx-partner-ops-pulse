@@ -218,6 +218,7 @@ export function useRegisterCashStepRequired(required: CashReconAssociate[], load
 export function ContinueToDriverValidation() {
   const ctx = useContext(CashStepGateContext);
   const [showModal, setShowModal] = useState(false);
+  const [navigating, setNavigating] = useState(false);
   const router = useRouter();
   if (!ctx) return null;
 
@@ -253,8 +254,16 @@ export function ContinueToDriverValidation() {
             Continue to driver validation →
           </button>
         ) : (
-          <button className="button" type="button" onClick={() => router.push(step2Href)}>
-            Continue to driver validation →
+          <button
+            className="button"
+            type="button"
+            disabled={navigating}
+            onClick={() => {
+              setNavigating(true);
+              router.push(step2Href);
+            }}
+          >
+            {navigating ? "Opening driver validation…" : "Continue to driver validation →"}
           </button>
         )}
       </div>
