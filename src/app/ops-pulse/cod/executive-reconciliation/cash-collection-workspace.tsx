@@ -326,6 +326,10 @@ export function CashCollectionWorkspace({
 
   useRegisterCashStepRequired(requiredForGate, loaded && !loading && !error);
 
+  // Block cash entry until cash-recon driver denominations have loaded (when worker is configured).
+  const driversReady = !workerConfigured || (loaded && !loading && !pending);
+  const entryEnabled = canEdit && driversReady;
+
   return (
     <>
       <section className="panel reconciliation-stage">
@@ -370,27 +374,42 @@ export function CashCollectionWorkspace({
               <div className="panel-body"><strong>Unable to load cash recon</strong><p className="subtle" style={{ marginTop: 6 }}>{error}</p></div>
             </div>
           ) : null}
+          {workerConfigured && !driversReady && !error ? (
+            <p className="subtle" style={{ marginTop: 12 }}>
+              Collect cash and Add associate missing from DER stay locked until driver denominations finish loading.
+            </p>
+          ) : null}
         </div>
       </section>
 
-      <section className="panel">
+      <section className={`panel${!driversReady && workerConfigured ? " is-disabled" : ""}`}>
         <div className="panel-head">
           <div>
             <h2>Collect cash</h2>
-            <p className="subtle">Select associate, count denominations and save.</p>
+            <p className="subtle">
+              {!driversReady && workerConfigured
+                ? "Waiting for driver denominations to load…"
+                : "Select associate, count denominations and save."}
+            </p>
           </div>
           <span className="count-badge">{enriched.length} available</span>
         </div>
-        {enriched.length || loading ? (
+        {enriched.length || loading || pending ? (
           <AssociateEntryBuilder
             associates={enriched}
             businessDate={businessDate}
-            canEdit={canEdit}
+            canEdit={entryEnabled}
             locationId={locationId}
             returnHref={returnHref}
             stationCode={stationCode}
             stationLabel={stationLabel}
-            emptyHint={loading ? "Loading associates…" : "No shipment associates found for this station yet."}
+            emptyHint={
+              !driversReady && workerConfigured
+                ? "Waiting for driver denominations…"
+                : loading || pending
+                  ? "Loading associates…"
+                  : "No shipment associates found for this station yet."
+            }
           />
         ) : (
           <div className="panel-body">
@@ -403,7 +422,8 @@ export function CashCollectionWorkspace({
         <MissingDerPanel
           associates={missing}
           businessDate={businessDate}
-          canEdit={canEdit}
+          canEdit={entryEnabled}
+          driversReady={driversReady}
           locationId={locationId}
           returnHref={returnHref}
           stationCode={stationCode}
