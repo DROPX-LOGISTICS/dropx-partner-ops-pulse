@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { SearchableSelect } from "@/components/searchable-select";
-import { SubmitButton } from "@/components/submit-button";
 import type { CashReconPendingBreakdown } from "@/lib/ops-pulse/cash-recon-types";
 import { saveExecutiveReconciliation } from "./cash-entry-actions";
 import { PendingReconModal } from "./pending-recon-modal";
@@ -89,6 +89,8 @@ export function AssociateEntryBuilder({
   stationLabel: string;
   emptyHint?: string;
 }) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
   const [rows, setRows] = useState<EntryRow[]>([{
     key: 1,
     providerEmployeeId: "",
@@ -102,10 +104,32 @@ export function AssociateEntryBuilder({
     denominationCounts: emptyDenominations()
   }]);
   const [pendingModalKey, setPendingModalKey] = useState<number | null>(null);
+  const [submittingKey, setSubmittingKey] = useState<number | null>(null);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const optionMap = useMemo(
     () => new Map(associates.map((associate) => [associate.providerEmployeeId, associate])),
     [associates]
   );
+
+  function resetRow(key: number) {
+    setRows((current) => {
+      if (current.length === 1) {
+        return current.map((row) => row.key === key ? {
+          key,
+          providerEmployeeId: "",
+          manualAssociateName: "",
+          expectedAmount: "",
+          expectedOriginal: "",
+          cashOtherAmount: "",
+          remarks: "",
+          pendingOverrideRemarks: "",
+          denominationUnlocked: true,
+          denominationCounts: emptyDenominations()
+        } : row);
+      }
+      return current.filter((row) => row.key !== key);
+    });
+  }
 
   function addRow() {
     setRows((current) => [
@@ -221,10 +245,32 @@ export function AssociateEntryBuilder({
           && entry.denominationUnlocked
           && (!expectedEdited || entry.remarks.trim())
           && (!requiresManualName || entry.manualAssociateName.trim());
+        const rowPending = submittingKey === entry.key && isPending;
 
         return (
           <article className="reconciliation-entry-card" key={entry.key}>
-            <form action={saveExecutiveReconciliation} id={formId}>
+            <form
+              id={formId}
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (!canSave || !canEdit || rowPending) return;
+                const form = event.currentTarget;
+                const formData = new FormData(form);
+                formData.set("response_mode", "client");
+                setSubmitError(null);
+                setSubmittingKey(entry.key);
+                startTransition(async () => {
+                  const result = await saveExecutiveReconciliation(formData);
+                  if (result?.ok) {
+                    resetRow(entry.key);
+                    router.refresh();
+                    return;
+                  }
+                  setSubmitError(result?.error ?? "Unable to save cash entry.");
+                  setSubmittingKey(null);
+                });
+              }}
+            >
               <div className="reconciliation-entry-grid">
                 <label>Associate
                   <SearchableSelect
@@ -296,9 +342,11 @@ export function AssociateEntryBuilder({
                   <input type="hidden" name="expected_original" value={entry.expectedOriginal || "0"} />
                   <input type="hidden" name="pending_recon_amount" value={String(associate?.pendingRecon ?? 0)} />
                   <input type="hidden" name="pending_override_remarks" value={entry.pendingOverrideRemarks} />
-                  <SubmitButton disabled={!canEdit || !canSave}>Save cash</SubmitButton>
+                  <button className="button" disabled={!canEdit || !canSave || rowPending} type="submit">
+                    {rowPending ? "Saving..." : "Save cash"}
+                  </button>
                   {rows.length > 1 ? (
-                    <button className="button ghost" type="button" onClick={() => removeRow(entry.key)} aria-label={`Remove associate row ${index + 1}`}>Remove</button>
+                    <button className="button ghost" type="button" disabled={rowPending} onClick={() => removeRow(entry.key)} aria-label={`Remove associate row ${index + 1}`}>Remove</button>
                   ) : null}
                 </div>
               </div>
@@ -348,6 +396,9 @@ export function AssociateEntryBuilder({
                 <span>Expected <strong>₹{currency(expectedAmount)}</strong></span>
                 <span className="cash-live-result">{cashState.label} {cashState.amount ? <strong>{cashState.amount}</strong> : null}</span>
               </div>
+              {submitError && submittingKey === entry.key ? (
+                <p className="subtle" style={{ color: "#b42318", marginTop: 8 }}>{submitError}</p>
+              ) : null}
             </form>
           </article>
         );

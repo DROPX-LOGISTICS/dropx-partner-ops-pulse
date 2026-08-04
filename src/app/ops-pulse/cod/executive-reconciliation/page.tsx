@@ -16,17 +16,14 @@ import {
   isMissingCodSetup,
   loadExecutiveReconciliationRows,
   loadPortalCheckRuns,
-  locationLabel,
-  type ExecutiveReconciliationViewRow
+  locationLabel
 } from "@/lib/ops-pulse/cod";
 import { isSupabaseAdminConfigured } from "@/lib/supabase-admin";
 import {
   continueCodWithPendingDriverReconciliation,
-  deleteExecutiveReconciliation,
   queueCodClosureCheck,
   requestCodGateException,
   reviewCodGateException,
-  saveExecutiveReconciliation,
   submitCodCashCollection,
   submitCodDayClosure
 } from "./actions";
@@ -43,6 +40,7 @@ import {
   ContinueToDriverValidation,
   DriverValidationNavLink
 } from "./cash-step-gate";
+import { SavedCashList } from "./saved-cash-list";
 
 function isCashReconWorkerConfigured() {
   return Boolean(
@@ -59,21 +57,6 @@ type SearchParams = {
   status?: string;
   step?: string;
 };
-
-const denominations = [
-  ["cash_500_count", "500"],
-  ["cash_200_count", "200"],
-  ["cash_100_count", "100"],
-  ["cash_50_count", "50"],
-  ["cash_20_count", "20"],
-  ["cash_10_count", "10"]
-] as const;
-
-type DenominationField = typeof denominations[number][0];
-
-function denominationValue(row: ExecutiveReconciliationViewRow, field: DenominationField) {
-  return row[field] ?? 0;
-}
 
 function loadFlash() {
   const raw = (cookies() as unknown as UnsafeUnwrappedCookies).get("dropx_cod_executive_reconciliation_flash")?.value;
@@ -112,93 +95,8 @@ function differenceLabel(value: number) {
   return "0.00";
 }
 
-type PendingDetail = NonNullable<ExecutiveReconciliationViewRow["scc_pending_details"]>[number];
-
-function stringValue(value: unknown) {
-  return String(value ?? "").replace(/\s+/g, " ").trim();
-}
-
 function objectValue(value: unknown) {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
-}
-
-function rawValueFromHeaders(raw: Record<string, unknown> | null | undefined, patterns: RegExp[]) {
-  const headersRaw = raw?.headers;
-  const cellsRaw = raw?.cells;
-  const headers = Array.isArray(headersRaw) ? headersRaw.map(stringValue) : [];
-  const cells = Array.isArray(cellsRaw) ? cellsRaw.map(stringValue) : [];
-  const index = headers.findIndex((header) => patterns.some((pattern) => pattern.test(header)));
-  return index >= 0 ? cells[index] ?? "" : "";
-}
-
-function detailTrackingId(detail: PendingDetail, index: number) {
-  const raw = objectValue(detail.raw_row);
-  return stringValue(detail.tracking_id ?? detail.shipment_id ?? detail.package_id ?? detail.order_id)
-    || rawValueFromHeaders(raw, [/tracking/i, /shipment/i, /package/i, /order/i, /awb/i, /tba/i])
-    || `Row ${index + 1}`;
-}
-
-function detailAmount(detail: PendingDetail): number | string | null | undefined {
-  const raw = objectValue(detail.raw_row);
-  return detail.amount ?? rawValueFromHeaders(raw, [/pending/i, /amount/i, /cash/i, /cod/i]);
-}
-
-function detailStatus(detail: PendingDetail) {
-  const raw = objectValue(detail.raw_row);
-  return stringValue(detail.status) || rawValueFromHeaders(raw, [/status/i, /state/i, /reason/i]) || "-";
-}
-
-function detailDescription(detail: PendingDetail) {
-  const direct = stringValue(detail.description);
-  if (direct) return direct;
-  const raw = objectValue(detail.raw_row);
-  const cellsRaw = raw.cells;
-  const cells = Array.isArray(cellsRaw) ? cellsRaw.map(stringValue).filter(Boolean) : [];
-  return cells.slice(0, 8).join(" | ") || "-";
-}
-
-function PendingReconDetails({ row }: { row: ExecutiveReconciliationViewRow }) {
-  const details = Array.isArray(row.scc_pending_details) ? row.scc_pending_details : [];
-  return (
-    <details className="associate-drilldown">
-      <summary>
-        <span className="associate-name-link">{executiveDisplayName(row)}</span>
-        <span className="subtle">SCC pending {formatAmount(row.scc_pending_amount)}</span>
-      </summary>
-      <div className="scc-pending-panel">
-        <div className="scc-pending-meta">
-          <strong>Pending reconciliation details</strong>
-          <span className="subtle">Last fetched: {formatDateTime(row.scc_last_detail_checked_at ?? row.source_updated_at)}</span>
-        </div>
-        {details.length ? (
-          <table className="scc-pending-table">
-            <thead>
-              <tr>
-                <th>Tracking ID</th>
-                <th>Pending</th>
-                <th>Status</th>
-                <th>Source row</th>
-              </tr>
-            </thead>
-            <tbody>
-              {details.map((detail, index) => (
-                <tr key={`${row.key}-pending-${index}`}>
-                  <td>{detailTrackingId(detail, index)}</td>
-                  <td>{formatAmount(detailAmount(detail))}</td>
-                  <td>{detailStatus(detail)}</td>
-                  <td>{detailDescription(detail)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        ) : (
-          <div className="scc-detail-empty">
-            No tracking-level rows captured yet. Fetch the SCC roster for this station/date after the worker is updated.
-          </div>
-        )}
-      </div>
-    </details>
-  );
 }
 
 export const dynamic = "force-dynamic";
@@ -703,78 +601,12 @@ export default async function ExecutiveReconciliationPage(props: { searchParams?
               </div>
               <span className="count-badge">{savedRows.length} entries</span>
             </div>
-            <div className="reconciliation-entry-list reconciliation-saved-list" aria-label="Executive reconciliation sheet">
-              {savedRows.length ? savedRows.map((row) => {
-                const difference = amountValue(row.difference_amount);
-                return (
-                  <article className="reconciliation-entry-card" key={row.key}>
-                    <form action={saveExecutiveReconciliation}>
-                      <div className="reconciliation-entry-grid reconciliation-saved-grid">
-                        <div>
-                          <span className="reconciliation-field-label">Associate</span>
-                          {row.source_associate_name ? (
-                            <PendingReconDetails row={row} />
-                          ) : (
-                            <input className="field" name="manual_associate_name" defaultValue={row.manual_associate_name ?? ""} placeholder="Associate name" required />
-                          )}
-                          <span className="subtle">{row.provider_employee_id} · {row.shipment_type ?? "SCC Driver Reconciliation"}</span>
-                        </div>
-                        <label>Expected COD
-                          <input className="field" name="expected_amount" defaultValue={String(row.expected_amount ?? 0)} inputMode="decimal" />
-                        </label>
-                        <label>Remarks
-                          <input className="field" name="remarks" defaultValue={row.remarks ?? ""} placeholder="Optional note" />
-                        </label>
-                        <div className="reconciliation-row-actions">
-                          <input type="hidden" name="return_href" value={returnHref} />
-                          <input type="hidden" name="business_date" value={row.business_date} />
-                          <input type="hidden" name="location_id" value={row.location_id ?? ""} />
-                          <input type="hidden" name="station_code" value={row.station_code} />
-                          <input type="hidden" name="provider_employee_id" value={row.provider_employee_id} />
-                          <input type="hidden" name="source_associate_name" value={row.source_associate_name ?? ""} />
-                          <input type="hidden" name="shipment_type" value={row.shipment_type ?? ""} />
-                          <input type="hidden" name="total_delivery" value={String(row.total_delivery ?? 0)} />
-                          <input type="hidden" name="total_activity" value={String(row.total_activity ?? 0)} />
-                          <SubmitButton className="button secondary" disabled={!permission.canEdit || selectedClosure?.is_final_submitted}>Update</SubmitButton>
-                          <button
-                            className="button ghost"
-                            formAction={deleteExecutiveReconciliation}
-                            disabled={!permission.canEdit || selectedClosure?.is_final_submitted}
-                            type="submit"
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      </div>
-                      <details className="cash-breakdown">
-                        <summary>Cash denomination count</summary>
-                        <div className="cash-breakdown-grid">
-                          {denominations.map(([name, label]) => (
-                            <label key={`${row.key}-${name}`}>₹{label}
-                              <input className="field" name={name} defaultValue={String(denominationValue(row, name))} inputMode="numeric" />
-                            </label>
-                          ))}
-                          <label>Other / coins
-                            <input className="field" name="cash_other_amount" defaultValue={String(row.cash_other_amount ?? 0)} inputMode="decimal" />
-                          </label>
-                        </div>
-                      </details>
-                      <div className={`cash-live-status ${difference < -0.005 ? "short" : difference > 0.005 ? "excess" : "matched"}`}>
-                        <span>Collected <strong>{formatAmount(row.collected_amount)}</strong></span>
-                        <span>Expected <strong>{formatAmount(row.expected_amount)}</strong></span>
-                        <span className="cash-live-result">
-                          <StatusPill status={row.reconciliation_status} />
-                          {" "}
-                          <strong>{differenceLabel(difference)}</strong>
-                        </span>
-                      </div>
-                    </form>
-                  </article>
-                );
-              }) : (
-                <div className="panel-body"><p className="subtle">No saved cash entries.</p></div>
-              )}
-            </div>
+            <SavedCashList
+              rows={savedRows}
+              canEdit={permission.canEdit}
+              isFinalSubmitted={Boolean(selectedClosure?.is_final_submitted)}
+              returnHref={returnHref}
+            />
             {activeStep === 1 ? <ContinueToDriverValidation /> : null}
           </section>
 

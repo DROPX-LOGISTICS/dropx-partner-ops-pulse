@@ -21,11 +21,12 @@ type CashStepGateValue = {
   mode: "cash-recon" | "legacy";
   loaded: boolean;
   ready: boolean;
+  zeroCashReady: boolean;
   required: CashReconAssociate[];
   missing: CashReconAssociate[];
   step2Href: string;
   savedCount: number;
-  registerRequired: (required: CashReconAssociate[], loaded: boolean) => void;
+  registerRequired: (required: CashReconAssociate[], loaded: boolean, zeroCashReady: boolean) => void;
 };
 
 const CashStepGateContext = createContext<CashStepGateValue | null>(null);
@@ -138,10 +139,12 @@ export function CashStepGateProvider({
 }) {
   const [loaded, setLoaded] = useState(mode !== "cash-recon" || initialRequired.length > 0);
   const [required, setRequired] = useState<CashReconAssociate[]>(initialRequired);
+  const [zeroCashReady, setZeroCashReady] = useState(false);
 
-  const registerRequired = useCallback((nextRequired: CashReconAssociate[], isLoaded: boolean) => {
+  const registerRequired = useCallback((nextRequired: CashReconAssociate[], isLoaded: boolean, isZeroCashReady: boolean) => {
     setRequired(nextRequired);
     setLoaded(isLoaded);
+    setZeroCashReady(isZeroCashReady);
   }, []);
 
   const missing = useMemo(
@@ -151,17 +154,17 @@ export function CashStepGateProvider({
 
   const ready = mode === "legacy"
     ? savedCount > 0
-    : Boolean(loaded && required.length > 0 && missing.length === 0);
+    : Boolean(loaded && ((required.length > 0 && missing.length === 0) || zeroCashReady));
 
   const value = useMemo(
-    () => ({ mode, loaded, ready, required, missing, step2Href, savedCount, registerRequired }),
-    [mode, loaded, ready, required, missing, step2Href, savedCount, registerRequired]
+    () => ({ mode, loaded, ready, zeroCashReady, required, missing, step2Href, savedCount, registerRequired }),
+    [mode, loaded, ready, zeroCashReady, required, missing, step2Href, savedCount, registerRequired]
   );
 
   return <CashStepGateContext.Provider value={value}>{children}</CashStepGateContext.Provider>;
 }
 
-export function useRegisterCashStepRequired(required: CashReconAssociate[], loaded: boolean) {
+export function useRegisterCashStepRequired(required: CashReconAssociate[], loaded: boolean, zeroCashReady = false) {
   const ctx = useContext(CashStepGateContext);
   const registerRequired = ctx?.registerRequired;
   const requiredKey = required
@@ -172,8 +175,8 @@ export function useRegisterCashStepRequired(required: CashReconAssociate[], load
   useEffect(() => {
     // Do not wipe server-seeded required list while the client fetch is still in flight.
     if (!loaded) return;
-    registerRequired?.(required, true);
-  }, [requiredKey, loaded, registerRequired, required]);
+    registerRequired?.(required, true, zeroCashReady);
+  }, [requiredKey, loaded, registerRequired, required, zeroCashReady]);
 }
 
 export function ContinueToDriverValidation() {
@@ -181,7 +184,7 @@ export function ContinueToDriverValidation() {
   const [showModal, setShowModal] = useState(false);
   if (!ctx) return null;
 
-  const { mode, loaded, ready, required, missing, step2Href, savedCount } = ctx;
+  const { mode, loaded, ready, zeroCashReady, required, missing, step2Href, savedCount } = ctx;
   const blocked = mode === "legacy" ? savedCount === 0 : !ready;
 
   if (mode === "legacy" && !savedCount) return null;
@@ -190,6 +193,8 @@ export function ContinueToDriverValidation() {
     ? "Review differences before submitting COD."
     : !loaded
       ? "Waiting for cash-recon drivers… then enter cash for every associate with expected > 0."
+      : zeroCashReady
+        ? "No pending recon and no cash expected for this station/date. You can continue to driver validation."
       : required.length === 0
         ? "No associates with expected > 0 found yet. Refresh drivers, then enter denominations."
         : blocked

@@ -424,7 +424,21 @@ export function CashCollectionWorkspace({
     return Array.from(byId.values());
   }, [apiRequired, enriched, missing]);
 
-  useRegisterCashStepRequired(requiredForGate, loaded && !loading && !error);
+  const zeroCashReady = useMemo(() => {
+    if (!loaded || loading || Boolean(error)) return false;
+    const expectedTotal = Number(expectedCash?.totalReceived) || 0;
+    if (expectedTotal > 0.01) return false;
+
+    const pendingRows = apiAssociates.length || apiMissingFromDer.length
+      ? [...apiAssociates, ...apiMissingFromDer]
+      : reconciliation.map((row) => ({
+          pendingRecon: moneyValue(row.paymentInfo?.overallPendingRecon)
+        }));
+
+    return pendingRows.every((row) => (Number(row.pendingRecon) || 0) <= 0.01);
+  }, [apiAssociates, apiMissingFromDer, error, expectedCash, loaded, loading, reconciliation]);
+
+  useRegisterCashStepRequired(requiredForGate, loaded && !loading && !error, zeroCashReady);
 
   const busy = loading || refreshing || pending;
   const driversReady = !workerConfigured || (loaded && !loading && !error);

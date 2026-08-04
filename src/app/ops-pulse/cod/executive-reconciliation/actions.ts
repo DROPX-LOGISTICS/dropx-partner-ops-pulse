@@ -18,6 +18,12 @@ import { fetchLiabilitySummary, isCashReconWorkerConfigured } from "@/lib/ops-pu
 const pagePath = "/ops-pulse/cod/executive-reconciliation";
 const publicPagePath = "/cod/executive-reconciliation";
 
+export type CashEntryActionResult = {
+  ok: boolean;
+  notice?: string;
+  error?: string;
+};
+
 function redirectWithFlash(params: { error?: string; notice?: string }, href = publicPagePath): never {
   // path "/" so flash works on both /cod/* (ops host) and /ops-pulse/cod/* URLs
   (cookies() as unknown as UnsafeUnwrappedCookies).set("dropx_cod_executive_reconciliation_flash", JSON.stringify(params), {
@@ -34,6 +40,10 @@ function safeReturnHref(value: FormDataEntryValue | null) {
   if (!href) return publicPagePath;
   if (href.startsWith(publicPagePath) || href.startsWith(pagePath)) return href;
   return publicPagePath;
+}
+
+function wantsClientResponse(formData: FormData) {
+  return clean(formData.get("response_mode")) === "client";
 }
 
 function appBaseUrl() {
@@ -291,18 +301,23 @@ async function savePayload(
 
   revalidatePath(pagePath);
   revalidatePath(publicPagePath);
-  redirectWithFlash({ notice: successMessage }, returnHref);
+  return { notice: successMessage, returnHref };
 }
 
 export async function saveExecutiveReconciliation(formData: FormData) {
   const authorization = await requirePagePermission("cod_executive_reconciliation", "edit");
   const companyId = requireCompanyId(authorization);
+  const clientResponse = wantsClientResponse(formData);
 
   try {
-    await savePayload(formData, authorization, companyId, "Executive reconciliation saved.");
+    const result = await savePayload(formData, authorization, companyId, "Executive reconciliation saved.");
+    if (clientResponse) return { ok: true, notice: result.notice } satisfies CashEntryActionResult;
+    redirectWithFlash({ notice: result.notice }, result.returnHref);
   } catch (error) {
     if (isNextRedirectError(error)) throw error;
-    redirectWithFlash({ error: (error as Error).message }, safeReturnHref(formData.get("return_href")));
+    const message = (error as Error).message;
+    if (clientResponse) return { ok: false, error: message } satisfies CashEntryActionResult;
+    redirectWithFlash({ error: message }, safeReturnHref(formData.get("return_href")));
   }
 }
 
@@ -799,6 +814,7 @@ export async function deleteExecutiveReconciliation(formData: FormData) {
   const authorization = await requirePagePermission("cod_executive_reconciliation", "edit");
   const companyId = requireCompanyId(authorization);
   const returnHref = safeReturnHref(formData.get("return_href"));
+  const clientResponse = wantsClientResponse(formData);
   try {
     if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
     const businessDate = required(formData.get("business_date"), "Business date");
@@ -838,10 +854,13 @@ export async function deleteExecutiveReconciliation(formData: FormData) {
     });
     await markCashSubmissionStale(companyId, businessDate, locationId);
     revalidatePath(pagePath);
+    if (clientResponse) return { ok: true, notice: `${providerEmployeeId} reconciliation entry deleted.` } satisfies CashEntryActionResult;
     redirectWithFlash({ notice: `${providerEmployeeId} reconciliation entry deleted.` }, returnHref);
   } catch (error) {
     if (isNextRedirectError(error)) throw error;
-    redirectWithFlash({ error: error instanceof Error ? error.message : "Unable to delete reconciliation entry." }, returnHref);
+    const message = error instanceof Error ? error.message : "Unable to delete reconciliation entry.";
+    if (clientResponse) return { ok: false, error: message } satisfies CashEntryActionResult;
+    redirectWithFlash({ error: message }, returnHref);
   }
 }
 

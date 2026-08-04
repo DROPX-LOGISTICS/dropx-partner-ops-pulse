@@ -1,0 +1,242 @@
+"use client";
+
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { StatusPill } from "@/components/status-pill";
+import {
+  amountValue,
+  executiveDisplayName,
+  formatAmount,
+  type ExecutiveReconciliationViewRow
+} from "@/lib/ops-pulse/cod";
+import { deleteExecutiveReconciliation, saveExecutiveReconciliation } from "./cash-entry-actions";
+
+const denominations = [
+  ["cash_500_count", "500"],
+  ["cash_200_count", "200"],
+  ["cash_100_count", "100"],
+  ["cash_50_count", "50"],
+  ["cash_20_count", "20"],
+  ["cash_10_count", "10"]
+] as const;
+
+type DenominationField = typeof denominations[number][0];
+
+function denominationValue(row: ExecutiveReconciliationViewRow, field: DenominationField) {
+  return row[field] ?? 0;
+}
+
+function differenceLabel(value: number) {
+  if (value < 0) return `Short ${formatAmount(Math.abs(value))}`;
+  if (value > 0) return `Excess ${formatAmount(value)}`;
+  return "0.00";
+}
+
+function objectValue(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function stringValue(value: unknown) {
+  return typeof value === "string" ? value : "";
+}
+
+type PendingDetail = ExecutiveReconciliationViewRow["scc_pending_details"] extends (infer Item)[] | null ? Item : never;
+
+function detailTrackingId(detail: PendingDetail, index: number) {
+  const raw = objectValue(detail.raw_row);
+  return stringValue(raw.trackingId) || stringValue(raw.tracking_id) || `Pending item ${index + 1}`;
+}
+
+function detailAmount(detail: PendingDetail): number | string | null | undefined {
+  const raw = objectValue(detail.raw_row);
+  return detail.pending_amount ?? raw.amount ?? raw.pendingAmount;
+}
+
+function detailStatus(detail: PendingDetail) {
+  const raw = objectValue(detail.raw_row);
+  return stringValue(raw.status) || stringValue(raw.state) || "Pending";
+}
+
+function detailDescription(detail: PendingDetail) {
+  const direct = stringValue(detail.description);
+  if (direct) return direct;
+  const raw = objectValue(detail.raw_row);
+  return stringValue(raw.description) || stringValue(raw.reason) || stringValue(raw.notes) || "Pending in SCC";
+}
+
+function PendingReconDetails({ row }: { row: ExecutiveReconciliationViewRow }) {
+  const details = Array.isArray(row.scc_pending_details) ? row.scc_pending_details : [];
+  return (
+    <details className="scc-pending-details">
+      <summary>
+        <span className="associate-name-link">{executiveDisplayName(row)}</span>
+        <span className="subtle">SCC pending {formatAmount(row.scc_pending_amount)}</span>
+      </summary>
+      <div className="scc-pending-panel">
+        <p className="subtle">Open pending items from the latest SCC reconciliation snapshot.</p>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Tracking ID</th>
+                <th>Amount</th>
+                <th>Status</th>
+                <th>Description</th>
+              </tr>
+            </thead>
+            <tbody>
+              {details.length ? details.map((detail, index) => (
+                <tr key={`${row.key}-pending-${index}`}>
+                  <td>{detailTrackingId(detail, index)}</td>
+                  <td>{formatAmount(detailAmount(detail))}</td>
+                  <td>{detailStatus(detail)}</td>
+                  <td>{detailDescription(detail)}</td>
+                </tr>
+              )) : (
+                <tr><td className="empty-cell" colSpan={4}>No SCC pending details available.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </details>
+  );
+}
+
+export function SavedCashList({
+  rows,
+  canEdit,
+  isFinalSubmitted,
+  returnHref
+}: {
+  rows: ExecutiveReconciliationViewRow[];
+  canEdit: boolean;
+  isFinalSubmitted: boolean;
+  returnHref: string;
+}) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+  const [activeKey, setActiveKey] = useState<string | null>(null);
+  const [activeAction, setActiveAction] = useState<"update" | "delete" | null>(null);
+  const [errorByKey, setErrorByKey] = useState<Record<string, string>>({});
+
+  return (
+    <div className="reconciliation-entry-list reconciliation-saved-list" aria-label="Executive reconciliation sheet">
+      {rows.length ? rows.map((row) => {
+        const difference = amountValue(row.difference_amount);
+        const rowPending = activeKey === row.key && isPending;
+        const rowError = errorByKey[row.key];
+        return (
+          <article className="reconciliation-entry-card" key={row.key}>
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (!canEdit || isFinalSubmitted || rowPending) return;
+                const form = event.currentTarget;
+                const formData = new FormData(form);
+                formData.set("response_mode", "client");
+                setErrorByKey((current) => ({ ...current, [row.key]: "" }));
+                setActiveKey(row.key);
+                setActiveAction("update");
+                startTransition(async () => {
+                  const result = await saveExecutiveReconciliation(formData);
+                  if (result?.ok) {
+                    router.refresh();
+                    return;
+                  }
+                  setErrorByKey((current) => ({ ...current, [row.key]: result?.error ?? "Unable to update cash entry." }));
+                  setActiveKey(null);
+                  setActiveAction(null);
+                });
+              }}
+            >
+              <div className="reconciliation-entry-grid reconciliation-saved-grid">
+                <div>
+                  <span className="reconciliation-field-label">Associate</span>
+                  {row.source_associate_name ? (
+                    <PendingReconDetails row={row} />
+                  ) : (
+                    <input className="field" name="manual_associate_name" defaultValue={row.manual_associate_name ?? ""} placeholder="Associate name" required />
+                  )}
+                  <span className="subtle">{row.provider_employee_id} · {row.shipment_type ?? "SCC Driver Reconciliation"}</span>
+                </div>
+                <label>Expected COD
+                  <input className="field" name="expected_amount" defaultValue={String(row.expected_amount ?? 0)} inputMode="decimal" />
+                </label>
+                <label>Remarks
+                  <input className="field" name="remarks" defaultValue={row.remarks ?? ""} placeholder="Optional note" />
+                </label>
+                <div className="reconciliation-row-actions">
+                  <input type="hidden" name="return_href" value={returnHref} />
+                  <input type="hidden" name="business_date" value={row.business_date} />
+                  <input type="hidden" name="location_id" value={row.location_id ?? ""} />
+                  <input type="hidden" name="station_code" value={row.station_code} />
+                  <input type="hidden" name="provider_employee_id" value={row.provider_employee_id} />
+                  <input type="hidden" name="source_associate_name" value={row.source_associate_name ?? ""} />
+                  <input type="hidden" name="shipment_type" value={row.shipment_type ?? ""} />
+                  <input type="hidden" name="total_delivery" value={String(row.total_delivery ?? 0)} />
+                  <input type="hidden" name="total_activity" value={String(row.total_activity ?? 0)} />
+                  <button className="button secondary" disabled={!canEdit || isFinalSubmitted || rowPending} type="submit">
+                    {rowPending && activeAction === "update" ? "Updating..." : "Update"}
+                  </button>
+                  <button
+                    className="button ghost"
+                    disabled={!canEdit || isFinalSubmitted || rowPending}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      if (!window.confirm(`Delete saved cash entry for ${executiveDisplayName(row)}?`)) return;
+                      const form = event.currentTarget.form;
+                      if (!form) return;
+                      const formData = new FormData(form);
+                      formData.set("response_mode", "client");
+                      setErrorByKey((current) => ({ ...current, [row.key]: "" }));
+                      setActiveKey(row.key);
+                      setActiveAction("delete");
+                      startTransition(async () => {
+                        const result = await deleteExecutiveReconciliation(formData);
+                        if (result?.ok) {
+                          router.refresh();
+                          return;
+                        }
+                        setErrorByKey((current) => ({ ...current, [row.key]: result?.error ?? "Unable to delete cash entry." }));
+                        setActiveKey(null);
+                        setActiveAction(null);
+                      });
+                    }}
+                    type="button"
+                  >
+                    {rowPending && activeAction === "delete" ? "Deleting..." : "Delete"}
+                  </button>
+                </div>
+              </div>
+              <details className="cash-breakdown">
+                <summary>Cash denomination count</summary>
+                <div className="cash-breakdown-grid">
+                  {denominations.map(([name, label]) => (
+                    <label key={`${row.key}-${name}`}>₹{label}
+                      <input className="field" name={name} defaultValue={String(denominationValue(row, name))} inputMode="numeric" />
+                    </label>
+                  ))}
+                  <label>Other / coins
+                    <input className="field" name="cash_other_amount" defaultValue={String(row.cash_other_amount ?? 0)} inputMode="decimal" />
+                  </label>
+                </div>
+              </details>
+              <div className={`cash-live-status ${difference < -0.005 ? "short" : difference > 0.005 ? "excess" : "matched"}`}>
+                <span>Collected <strong>{formatAmount(row.collected_amount)}</strong></span>
+                <span>Expected <strong>{formatAmount(row.expected_amount)}</strong></span>
+                <span className="cash-live-result">
+                  <StatusPill status={row.reconciliation_status} />{" "}
+                  <strong>{differenceLabel(difference)}</strong>
+                </span>
+              </div>
+              {rowError ? <p className="subtle" style={{ color: "#b42318", marginTop: 8 }}>{rowError}</p> : null}
+            </form>
+          </article>
+        );
+      }) : (
+        <div className="panel-body"><p className="subtle">No saved cash entries.</p></div>
+      )}
+    </div>
+  );
+}
