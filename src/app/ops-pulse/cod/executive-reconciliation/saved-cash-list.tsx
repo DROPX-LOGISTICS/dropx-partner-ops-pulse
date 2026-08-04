@@ -49,12 +49,12 @@ function detailTrackingId(detail: PendingDetail, index: number) {
 
 function detailAmount(detail: PendingDetail): number | string | null | undefined {
   const raw = objectValue(detail.raw_row);
-  return detail.pending_amount ?? raw.amount ?? raw.pendingAmount;
+  return detail.amount ?? raw.amount ?? raw.pendingAmount;
 }
 
 function detailStatus(detail: PendingDetail) {
   const raw = objectValue(detail.raw_row);
-  return stringValue(raw.status) || stringValue(raw.state) || "Pending";
+  return stringValue(detail.status) || stringValue(raw.status) || stringValue(raw.state) || "Pending";
 }
 
 function detailDescription(detail: PendingDetail) {
