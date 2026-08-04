@@ -22,16 +22,21 @@ export type CashEntryActionResult = {
   ok: boolean;
   notice?: string;
   error?: string;
+  nextHref?: string;
 };
 
-function redirectWithFlash(params: { error?: string; notice?: string }, href = publicPagePath): never {
-  // path "/" so flash works on both /cod/* (ops host) and /ops-pulse/cod/* URLs
+function setFlashCookie(params: { error?: string; notice?: string }) {
   (cookies() as unknown as UnsafeUnwrappedCookies).set("dropx_cod_executive_reconciliation_flash", JSON.stringify(params), {
     httpOnly: true,
     maxAge: 25,
     path: "/",
     sameSite: "lax"
   });
+}
+
+function redirectWithFlash(params: { error?: string; notice?: string }, href = publicPagePath): never {
+  // path "/" so flash works on both /cod/* (ops host) and /ops-pulse/cod/* URLs
+  setFlashCookie(params);
   redirect(href);
 }
 
@@ -40,6 +45,16 @@ function safeReturnHref(value: FormDataEntryValue | null) {
   if (!href) return publicPagePath;
   if (href.startsWith(publicPagePath) || href.startsWith(pagePath)) return href;
   return publicPagePath;
+}
+
+function withStep(href: string, step: number) {
+  try {
+    const url = new URL(href, "https://dropx.local");
+    url.searchParams.set("step", String(step));
+    return `${url.pathname}${url.search}`;
+  } catch {
+    return href;
+  }
 }
 
 function wantsClientResponse(formData: FormData) {
@@ -455,7 +470,7 @@ export async function submitCodCashCollection(formData: FormData) {
       is_final_submitted: false,
       validation_status: Math.abs(difference) >= 0.01
         ? "Mismatch"
-        : cashReconReady && !codMaster
+        : cashReconReady
           ? "Matched"
           : "Validation required",
       submission_status: "Submitted",
@@ -463,8 +478,9 @@ export async function submitCodCashCollection(formData: FormData) {
       validation_snapshot: { ...previousSnapshot, cash_submission: cashSnapshot },
       submitted_by: authorization.userId,
       submitted_at: now,
-      driver_check_status: cashReconReady && !codMaster ? "Passed" : "Queued",
-      deposit_check_status: "Locked",
+      // Cash-recon liability check clears the driver gate; Step 3 opens immediately.
+      driver_check_status: cashReconReady ? "Passed" : "Queued",
+      deposit_check_status: cashReconReady ? "Not run" : "Locked",
       updated_at: now
     };
 
@@ -494,7 +510,8 @@ export async function submitCodCashCollection(formData: FormData) {
 
     let driverCheckRunId: string | null = null;
     let driverCheckStatus = cashReconReady ? "Passed" : "Queued";
-    if (codMaster) {
+    // Only queue the old SCC portal path when cash-recon worker is not available.
+    if (!cashReconReady && codMaster) {
       const run = await supabaseAdmin
         .from("ops_portal_check_runs")
         .upsert({
@@ -535,8 +552,6 @@ export async function submitCodCashCollection(formData: FormData) {
           cache: "no-store"
         }).catch(() => undefined));
       }
-    } else if (cashReconReady) {
-      // Liability already verified via cash-recon worker; keep driver check clear for the wizard.
     }
 
     const previousDifference = Number(previousCash.difference_amount ?? Number.NaN);
@@ -602,10 +617,21 @@ export async function submitCodCashCollection(formData: FormData) {
         : cashReconReady
           ? "COD submitted with no variance. Cash liability check passed."
           : "COD submitted with no variance. Driver Reconciliation is running.";
-    redirectWithFlash({ notice }, returnHref);
+    // Cash-recon clears driver gate → land on deposit step. Legacy SCC path stays on step 2.
+    const nextHref = withStep(returnHref, cashReconReady ? 3 : 2);
+    if (wantsClientResponse(formData)) {
+      setFlashCookie({ notice });
+      return { ok: true, notice, nextHref } satisfies CashEntryActionResult;
+    }
+    redirectWithFlash({ notice }, nextHref);
   } catch (error) {
     if (isNextRedirectError(error)) throw error;
-    redirectWithFlash({ error: error instanceof Error ? error.message : "Unable to submit COD cash." }, returnHref);
+    const message = error instanceof Error ? error.message : "Unable to submit COD cash.";
+    if (wantsClientResponse(formData)) {
+      setFlashCookie({ error: message });
+      return { ok: false, error: message } satisfies CashEntryActionResult;
+    }
+    redirectWithFlash({ error: message }, returnHref);
   }
 }
 

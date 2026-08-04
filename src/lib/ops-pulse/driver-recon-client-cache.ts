@@ -48,6 +48,30 @@ export function readDriverReconCache(key: string): DriverReconClientPayload | nu
   return entry.payload;
 }
 
+/** Prefer any warm cache for this station/date/location (Step 1 may use a different baseline key). */
+export function readLatestDriverReconCache(params: {
+  stationCode: string;
+  businessDate: string;
+  locationId: string;
+}): DriverReconClientPayload | null {
+  const prefix = [
+    params.stationCode.trim().toUpperCase(),
+    params.businessDate.trim(),
+    params.locationId.trim(),
+    ""
+  ].slice(0, 3).join("|") + "|";
+  let best: CacheEntry | null = null;
+  for (const [key, entry] of store.entries()) {
+    if (!key.startsWith(prefix)) continue;
+    if (Date.now() - entry.savedAt > TTL_MS) {
+      store.delete(key);
+      continue;
+    }
+    if (!best || entry.savedAt > best.savedAt) best = entry;
+  }
+  return best?.payload ?? null;
+}
+
 export function writeDriverReconCache(key: string, payload: DriverReconClientPayload) {
   store.set(key, { payload, savedAt: Date.now() });
 }

@@ -71,6 +71,10 @@ function runStatus(run: PortalRun | undefined): CodGateStatus {
 function preserveGateStatus(stored: CodGateStatus, derived: CodGateStatus) {
   if (stored.startsWith("Exception ")) return stored;
   if (stored === "Not run" || stored === "Locked") return stored;
+  // Cash-recon path marks driver Passed after liability check; don't let a stale Queued SCC run re-lock Step 3.
+  if (stored === "Passed" && ["Queued", "Running", "Pending", "Not run", "Locked"].includes(derived)) {
+    return stored;
+  }
   return derived;
 }
 

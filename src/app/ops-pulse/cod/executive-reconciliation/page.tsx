@@ -24,20 +24,20 @@ import {
   queueCodClosureCheck,
   requestCodGateException,
   reviewCodGateException,
-  submitCodCashCollection,
   submitCodDayClosure
 } from "./actions";
 import { LiveCacheRefresh } from "./live-cache-refresh";
 import { loadCodDayClosures, loadCodManagerNotifications } from "@/lib/ops-pulse/cod-day-closure";
 import { canAccessCodAudit, loadCodAuditRows } from "@/lib/ops-pulse/cod-audit";
 import { PortalCheckProgress } from "./portal-check-progress";
+import { DriverReconCashPanel } from "./driver-recon-cash-panel";
 import { resolveOperatingContext } from "@/lib/ops-pulse/operating-context";
 import {
   expectedFromCashReconRaw,
   missingRequiredCashEntries,
   type CashReconAssociate
 } from "@/lib/ops-pulse/cash-recon-types";
-import { CashSubmissionButton } from "./cash-submission-button";
+import { CashSubmissionForm } from "./cash-submission-form";
 import { CashCollectionWorkspace } from "./cash-collection-workspace";
 import {
   CashStepGateProvider,
@@ -433,19 +433,16 @@ export default async function ExecutiveReconciliationPage(props: { searchParams?
                         {cashSubmitted ? ` · Last submitted ${formatDateTime(String(cashSubmissionSnapshot.submitted_at ?? ""))}` : ""}
                       </small>
                     </div>
-                    <form action={submitCodCashCollection}>
-                      <input type="hidden" name="return_href" value={returnHref} />
-                      <input type="hidden" name="business_date" value={result.businessDate} />
-                      <input type="hidden" name="location_id" value={defaultLocationId} />
-                      <CashSubmissionButton
-                        disabled={!permission.canEdit || !savedRows.length || Boolean(selectedClosure?.is_final_submitted)}
-                        stationCode={selectedStation?.station_code ?? ""}
-                        businessDate={result.businessDate}
-                        varianceLabel={currentVarianceLabel}
-                        varianceType={currentVarianceType}
-                        workerConfigured={cashReconReady}
-                      />
-                    </form>
+                    <CashSubmissionForm
+                      businessDate={result.businessDate}
+                      disabled={!permission.canEdit || !savedRows.length || Boolean(selectedClosure?.is_final_submitted)}
+                      locationId={defaultLocationId}
+                      returnHref={returnHref}
+                      stationCode={selectedStation?.station_code ?? ""}
+                      varianceLabel={currentVarianceLabel}
+                      varianceType={currentVarianceType}
+                      workerConfigured={cashReconReady}
+                    />
                   </section>
                   {activeStep === 2 && cashSubmitted && submittedDifference !== 0 ? (
                     <div className="cash-exception-strip">
@@ -460,25 +457,37 @@ export default async function ExecutiveReconciliationPage(props: { searchParams?
                   <section className={`reconciliation-gate ${activeStep !== 2 ? "reconciliation-step-hidden" : ""}`}>
                     <div className="reconciliation-gate-head">
                       <div><span>Validation 1</span><strong>Driver reconciliation</strong></div>
-                      <StatusPill status={driverDisplayStatus} />
+                      {cashReconReady ? null : <StatusPill status={driverDisplayStatus} />}
                     </div>
-                    <PortalCheckProgress
-                      attemptCount={Number(driverRun?.attempt_count ?? 0)}
-                      checkLabel="SCC Driver Reconciliation"
-                      lastCheckedAt={driverRun?.last_checked_at ?? null}
-                      nextCheckAt={driverRun?.next_check_at ?? null}
-                      summary={driverRun?.summary ?? null}
-                      status={driverRun?.status ?? "Not run"}
-                    />
-                    <form action={queueCodClosureCheck} className="form-actions" style={{ marginTop: 12 }}>
-                      <input type="hidden" name="return_href" value={returnHref} />
-                      <input type="hidden" name="business_date" value={result.businessDate} />
-                      <input type="hidden" name="location_id" value={defaultLocationId} />
-                      <input type="hidden" name="check_type" value="driver_reconciliation" />
-                      <SubmitButton className="button secondary" disabled={!permission.canEdit || !cashSubmitted || selectedClosure?.is_final_submitted}>
-                        {cashSubmitted ? "Recheck SCC" : "Submit cash first"}
-                      </SubmitButton>
-                    </form>
+                    {cashReconReady && selectedStation ? (
+                      <DriverReconCashPanel
+                        stationCode={selectedStation.station_code}
+                        businessDate={result.businessDate}
+                        locationId={defaultLocationId}
+                        canRefresh={permission.canEdit && !selectedClosure?.is_final_submitted}
+                        cashSubmitted={cashSubmitted}
+                      />
+                    ) : (
+                      <>
+                        <PortalCheckProgress
+                          attemptCount={Number(driverRun?.attempt_count ?? 0)}
+                          checkLabel="SCC Driver Reconciliation"
+                          lastCheckedAt={driverRun?.last_checked_at ?? null}
+                          nextCheckAt={driverRun?.next_check_at ?? null}
+                          summary={driverRun?.summary ?? null}
+                          status={driverRun?.status ?? "Not run"}
+                        />
+                        <form action={queueCodClosureCheck} className="form-actions" style={{ marginTop: 12 }}>
+                          <input type="hidden" name="return_href" value={returnHref} />
+                          <input type="hidden" name="business_date" value={result.businessDate} />
+                          <input type="hidden" name="location_id" value={defaultLocationId} />
+                          <input type="hidden" name="check_type" value="driver_reconciliation" />
+                          <SubmitButton className="button secondary" disabled={!permission.canEdit || !cashSubmitted || selectedClosure?.is_final_submitted}>
+                            {cashSubmitted ? "Recheck SCC" : "Submit cash first"}
+                          </SubmitButton>
+                        </form>
+                      </>
+                    )}
                     {selectedClosure && ["Pending", "Manual Review", "Error", "Exception rejected"].includes(selectedClosure.driver_check_status) ? (
                       <details className="reconciliation-exception">
                         <summary>Continue with SCC pending</summary>
