@@ -1272,18 +1272,11 @@ export async function validateCodRemittanceDeposit(formData: FormData): Promise<
     }
 
     const difference = Number((collected - remittance.remittanceTotalCash).toFixed(2));
-    const needsRemarks = Math.abs(difference) >= 0.01 || remittance.createdCount > 0;
+    // Short > ₹10 is confirmed on final Submit via override popup — allow validate without remarks.
+    const isShortOverLimit = difference < -10;
+    const needsRemarks = !isShortOverLimit && (Math.abs(difference) >= 0.01 || remittance.createdCount > 0);
     if (needsRemarks && !overrideRemarks) {
-      throw new Error(
-        difference < -10
-          ? `Cash is short by more than ₹10 vs remittance (₹${Math.abs(difference).toFixed(2)}). Override remarks are required.`
-          : "Remarks are required when cash differs from remittance total or remittance is still pending."
-      );
-    }
-    if (difference < -10 && !overrideRemarks) {
-      throw new Error(
-        `Cash is short by more than ₹10 vs remittance (₹${Math.abs(difference).toFixed(2)}). Override remarks are required.`
-      );
+      throw new Error("Remarks are required when cash differs from remittance total or remittance is still pending.");
     }
 
     const now = new Date().toISOString();
@@ -1357,7 +1350,8 @@ export async function validateCodRemittanceDeposit(formData: FormData): Promise<
   }
 }
 
-export async function submitCodDayClosure(formData: FormData) {
+export async function submitCodDayClosure(formData: FormData): Promise<CashEntryActionResult | void> {
+  const clientResponse = wantsClientResponse(formData);
   const authorization = await requirePagePermission("cod_executive_reconciliation", "edit");
   const companyId = requireCompanyId(authorization);
   const returnHref = safeReturnHref(formData.get("return_href"));
@@ -1398,9 +1392,19 @@ export async function submitCodDayClosure(formData: FormData) {
     });
     revalidatePath(pagePath);
     revalidatePath("/ops-pulse/cod");
-    redirectWithFlash({ notice: `COD day closure submitted for ${station.station_code}. Collected ₹${result.collectedCod.toFixed(2)}.` }, returnHref);
+    const notice = `COD day closure submitted for ${station.station_code}. Collected ₹${result.collectedCod.toFixed(2)}.`;
+    if (clientResponse) return { ok: true, notice, nextHref: returnHref } satisfies CashEntryActionResult;
+    redirectWithFlash({ notice }, returnHref);
   } catch (error) {
     if (isNextRedirectError(error)) throw error;
-    redirectWithFlash({ error: error instanceof Error ? error.message : "Unable to submit COD day closure." }, returnHref);
+    const message = error instanceof Error ? error.message : "Unable to submit COD day closure.";
+    if (clientResponse) return { ok: false, error: message } satisfies CashEntryActionResult;
+    redirectWithFlash({ error: message }, returnHref);
   }
+}
+
+/** Form-action wrapper for legacy portal submit (always redirects; no client JSON return). */
+export async function submitCodDayClosureForm(formData: FormData): Promise<void> {
+  formData.delete("response_mode");
+  await submitCodDayClosure(formData);
 }

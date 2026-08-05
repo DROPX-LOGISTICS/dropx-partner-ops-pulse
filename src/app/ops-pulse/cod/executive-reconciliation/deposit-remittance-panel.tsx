@@ -1,12 +1,12 @@
 "use client";
 
-import { useMemo, useRef, useState, useTransition, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { SubmitButton } from "@/components/submit-button";
 import type { RemittanceRowNormalized, RemittanceSummaryNormalized } from "@/lib/ops-pulse/cash-recon-types";
 import { submitCodDayClosure, validateCodRemittanceDeposit } from "./actions";
 
 const SHORT_BLOCK_RUPEES = 10;
+const VALIDATE_COOLDOWN_MS = 10_000;
 
 function currency(value: number) {
   return value.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -108,59 +108,59 @@ export function DepositRemittancePanel({
 }) {
   const router = useRouter();
   const validateFormRef = useRef<HTMLFormElement | null>(null);
-  const finalFormRef = useRef<HTMLFormElement | null>(null);
   const [checking, setChecking] = useState(false);
+  const [savingValidation, setSavingValidation] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [remittance, setRemittance] = useState<RemittanceSummaryNormalized | null>(null);
-  const [remarks, setRemarks] = useState(initialOverrideRemarks);
-  const [showRemarksModal, setShowRemarksModal] = useState(false);
+  const [validateRemarks, setValidateRemarks] = useState(initialOverrideRemarks);
+  const [submitOverrideRemarks, setSubmitOverrideRemarks] = useState("");
+  const [showDifferenceModal, setShowDifferenceModal] = useState(false);
+  const [showShortOverrideModal, setShowShortOverrideModal] = useState(false);
   const [depositValidated, setDepositValidated] = useState(depositAlreadyCleared);
-  const [pending, startTransition] = useTransition();
+  const [cooldownUntil, setCooldownUntil] = useState(0);
+  const [cooldownLeftSec, setCooldownLeftSec] = useState(0);
+
+  useEffect(() => {
+    setDepositValidated(depositAlreadyCleared);
+  }, [depositAlreadyCleared]);
+
+  useEffect(() => {
+    if (!cooldownUntil) {
+      setCooldownLeftSec(0);
+      return;
+    }
+    const tick = () => {
+      const left = Math.max(0, Math.ceil((cooldownUntil - Date.now()) / 1000));
+      setCooldownLeftSec(left);
+      if (left <= 0) setCooldownUntil(0);
+    };
+    tick();
+    const id = window.setInterval(tick, 250);
+    return () => window.clearInterval(id);
+  }, [cooldownUntil]);
 
   const difference = useMemo(() => {
     if (!remittance) return null;
     return Number((collectedCash - remittance.remittanceTotalCash).toFixed(2));
   }, [collectedCash, remittance]);
 
-  const needsRemarks = difference != null && Math.abs(difference) >= 0.01;
-  const shortBlocked = difference != null && difference < -SHORT_BLOCK_RUPEES;
+  const needsDifferenceRemarks = difference != null && Math.abs(difference) >= 0.01;
+  const isShortOverLimit = difference != null && difference < -SHORT_BLOCK_RUPEES;
   const hasPendingCreated = Boolean(remittance && remittance.createdCount > 0);
+  const validateBusy = checking || savingValidation;
+  const validateOnCooldown = cooldownLeftSec > 0;
+  const canValidate = canEdit && driverCleared && !isFinalSubmitted && !validateBusy && !validateOnCooldown && !submitting;
+  const canSubmitFinal = canEdit && driverCleared && depositValidated && !isFinalSubmitted && !submitting && !validateBusy;
 
-  async function validateDeposit() {
-    if (!driverCleared || !canEdit || isFinalSubmitted) return;
-    setError(null);
-    setChecking(true);
-    try {
-      const response = await fetch("/api/ops-pulse/cod/cash-recon/remittance", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ stationCode, date: businessDate })
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload?.error || "Unable to load remittance.");
-      const summary = payload as RemittanceSummaryNormalized;
-      setRemittance(summary);
-      const diff = Number((collectedCash - summary.remittanceTotalCash).toFixed(2));
-      const requiresRemarks = Math.abs(diff) >= 0.01 || summary.createdCount > 0;
-      if (requiresRemarks) {
-        setShowRemarksModal(true);
-        setDepositValidated(false);
-      } else {
-        setRemarks("");
-        setShowRemarksModal(false);
-        persistValidation(summary, "");
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to validate deposit.");
-      setDepositValidated(false);
-    } finally {
-      setChecking(false);
-    }
+  function startCooldown() {
+    setCooldownUntil(Date.now() + VALIDATE_COOLDOWN_MS);
   }
 
-  function persistValidation(summary: RemittanceSummaryNormalized, overrideRemarks: string) {
+  async function persistValidation(summary: RemittanceSummaryNormalized, overrideRemarks: string) {
     const form = validateFormRef.current;
-    if (!form) return;
+    if (!form) return false;
     const ensure = (name: string, value: string) => {
       let input = form.querySelector<HTMLInputElement>(`input[name="${name}"]`);
       if (!input) {
@@ -174,47 +174,119 @@ export function DepositRemittancePanel({
     ensure("remittance_override_remarks", overrideRemarks);
     ensure("remittance_payload", JSON.stringify(summary));
     ensure("collected_cash", String(collectedCash));
-    startTransition(async () => {
+    ensure("response_mode", "client");
+    setSavingValidation(true);
+    try {
       const result = await validateCodRemittanceDeposit(new FormData(form));
       if (!result || !("ok" in result) || !result.ok) {
         setError((result && "error" in result ? result.error : null) || "Unable to save remittance validation.");
         setDepositValidated(false);
-        return;
+        return false;
       }
       setDepositValidated(true);
-      setShowRemarksModal(false);
+      setShowDifferenceModal(false);
+      setNotice(result.notice || "Deposit remittance validated.");
+      return true;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to save remittance validation.");
+      setDepositValidated(false);
+      return false;
+    } finally {
+      setSavingValidation(false);
+    }
+  }
+
+  async function validateDeposit() {
+    if (!canValidate) return;
+    setError(null);
+    setNotice(null);
+    setShowDifferenceModal(false);
+    setShowShortOverrideModal(false);
+    setChecking(true);
+    try {
+      const response = await fetch("/api/ops-pulse/cod/cash-recon/remittance", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ stationCode, date: businessDate })
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload?.error || "Unable to load remittance.");
+      const summary = payload as RemittanceSummaryNormalized;
+      setRemittance(summary);
+      const diff = Number((collectedCash - summary.remittanceTotalCash).toFixed(2));
+      const needsRemarks = Math.abs(diff) >= 0.01 || summary.createdCount > 0;
+      // Short > ₹10 is handled on Submit via override popup — still allow validate.
+      if (needsRemarks && !(diff < -SHORT_BLOCK_RUPEES)) {
+        setDepositValidated(false);
+        setShowDifferenceModal(true);
+      } else {
+        await persistValidation(summary, validateRemarks.trim());
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to validate deposit.");
+      setDepositValidated(false);
+    } finally {
+      setChecking(false);
+      startCooldown();
+    }
+  }
+
+  async function confirmDifferenceRemarks() {
+    if (!remittance || !validateRemarks.trim() || savingValidation) return;
+    await persistValidation(remittance, validateRemarks.trim());
+  }
+
+  async function runFinalSubmit(overrideRemarks: string) {
+    if (submitting || !depositValidated || isFinalSubmitted) return;
+    setError(null);
+    setNotice(null);
+    setSubmitting(true);
+    try {
+      const formData = new FormData();
+      formData.set("return_href", returnHref);
+      formData.set("business_date", businessDate);
+      formData.set("location_id", locationId);
+      formData.set("remittance_override_remarks", overrideRemarks);
+      formData.set("response_mode", "client");
+      const result = await submitCodDayClosure(formData);
+      if (!result || !("ok" in result) || !result.ok) {
+        setError((result && "error" in result ? result.error : null) || "Unable to submit COD day closure.");
+        setSubmitting(false);
+        return;
+      }
+      setShowShortOverrideModal(false);
+      setNotice(result.notice || "COD day closure submitted.");
       router.refresh();
-    });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to submit COD day closure.");
+      setSubmitting(false);
+    }
   }
 
-  function confirmRemarks() {
-    if (!remittance || !remarks.trim()) return;
-    if (shortBlocked && !remarks.trim()) return;
-    persistValidation(remittance, remarks.trim());
-  }
-
-  function onFinalSubmit(event: FormEvent<HTMLFormElement>) {
-    if (!depositValidated || shortBlocked && !remarks.trim()) {
-      event.preventDefault();
-      setError(
-        shortBlocked
-          ? `Cash is short by more than ₹${SHORT_BLOCK_RUPEES}. Re-validate deposit and provide override remarks.`
-          : "Validate deposit before submitting final COD closure."
-      );
+  function onClickSubmitFinal() {
+    if (!canSubmitFinal) {
+      setError(depositValidated ? null : "Validate deposit before submitting final COD closure.");
       return;
     }
-    const form = event.currentTarget;
-    let input = form.querySelector<HTMLInputElement>('input[name="remittance_override_remarks"]');
-    if (!input) {
-      input = document.createElement("input");
-      input.type = "hidden";
-      input.name = "remittance_override_remarks";
-      form.appendChild(input);
+    if (isShortOverLimit) {
+      setSubmitOverrideRemarks("");
+      setShowShortOverrideModal(true);
+      return;
     }
-    input.value = remarks.trim();
+    void runFinalSubmit(validateRemarks.trim());
   }
 
-  const canSubmitFinal = canEdit && driverCleared && depositValidated && !isFinalSubmitted && !(shortBlocked && !remarks.trim());
+  const validateLabel = !driverCleared
+    ? "Driver recon required"
+    : checking
+      ? "Validating…"
+      : savingValidation
+        ? "Saving…"
+        : validateOnCooldown
+          ? `Wait ${cooldownLeftSec}s`
+          : remittance
+            ? "Validate again"
+            : "Validate deposit";
 
   return (
     <>
@@ -225,6 +297,7 @@ export function DepositRemittancePanel({
         </div>
         <p className="subtle">
           Validate against SCC remittance for {stationCode} · {businessDate}. Collected cash on this page: ₹{currency(collectedCash)}.
+          You can validate again after updates; locked only after final submit.
         </p>
         <form ref={validateFormRef} className="form-actions" style={{ marginTop: 12 }} onSubmit={(event) => event.preventDefault()}>
           <input type="hidden" name="return_href" value={returnHref} />
@@ -234,18 +307,32 @@ export function DepositRemittancePanel({
           <button
             className="button secondary"
             type="button"
-            disabled={!canEdit || !driverCleared || isFinalSubmitted || checking || pending}
+            disabled={!canValidate}
             onClick={() => void validateDeposit()}
           >
-            {checking ? "Validating…" : driverCleared ? "Validate deposit" : "Driver recon required"}
+            {validateLabel}
           </button>
         </form>
+        {validateOnCooldown && !checking ? (
+          <p className="subtle" style={{ marginTop: 8 }}>
+            Next validate available in {cooldownLeftSec}s (avoids double requests).
+          </p>
+        ) : null}
 
         {error ? (
           <div className="alert danger" style={{ marginTop: 12 }}>
-            <strong>Deposit validation</strong>
+            <strong>Deposit / submit</strong>
             <span>{error}</span>
           </div>
+        ) : null}
+        {notice ? (
+          <div className="alert" style={{ marginTop: 12 }}>
+            <strong>Status</strong>
+            <span>{notice}</span>
+          </div>
+        ) : null}
+        {submitting ? (
+          <p className="subtle" style={{ marginTop: 8 }}>Submitting final COD closure…</p>
         ) : null}
 
         {remittance ? (
@@ -277,18 +364,18 @@ export function DepositRemittancePanel({
               </div>
             ) : null}
 
-            {shortBlocked ? (
+            {isShortOverLimit ? (
               <div className="alert danger" style={{ marginTop: 12 }}>
                 <strong>Short over ₹{SHORT_BLOCK_RUPEES}</strong>
                 <span>
                   Cash on this page is ₹{currency(Math.abs(difference ?? 0))} below remittance total.
-                  Submit final COD is blocked until you provide override remarks.
+                  When you click Submit final COD, you must confirm with override remarks.
                 </span>
               </div>
-            ) : needsRemarks ? (
+            ) : needsDifferenceRemarks ? (
               <div className="alert" style={{ marginTop: 12 }}>
                 <strong>Cash difference</strong>
-                <span>Difference of ₹{currency(difference ?? 0)} requires remarks before deposit can be marked validated.</span>
+                <span>Difference of ₹{currency(difference ?? 0)} — remarks required when validating.</span>
               </div>
             ) : null}
 
@@ -323,40 +410,37 @@ export function DepositRemittancePanel({
           <span className="count-badge">{isFinalSubmitted ? "Final submitted" : depositValidated ? "Ready" : "Pending validation"}</span>
         </div>
         <p className="subtle">Final close locks all cash entries after remittance validation.</p>
-        {shortBlocked && !remarks.trim() ? (
+        {isShortOverLimit ? (
           <div className="alert danger" style={{ marginTop: 10 }}>
-            <strong>Submit blocked</strong>
-            <span>Negative cash difference exceeds ₹{SHORT_BLOCK_RUPEES}. Validate deposit and enter override remarks.</span>
+            <strong>Override required on submit</strong>
+            <span>Shortfall exceeds ₹{SHORT_BLOCK_RUPEES}. Submit will open a popup for override remarks.</span>
           </div>
         ) : null}
-        <form
-          ref={finalFormRef}
-          action={submitCodDayClosure}
-          className="form-actions"
-          style={{ marginTop: 12 }}
-          onSubmit={onFinalSubmit}
-        >
-          <input type="hidden" name="return_href" value={returnHref} />
-          <input type="hidden" name="business_date" value={businessDate} />
-          <input type="hidden" name="location_id" value={locationId} />
-          <input type="hidden" name="remittance_override_remarks" value={remarks} />
-          <SubmitButton disabled={!canSubmitFinal}>
-            {isFinalSubmitted ? "Final submitted and locked" : "Submit final COD closure"}
-          </SubmitButton>
-        </form>
+        <div className="form-actions" style={{ marginTop: 12 }}>
+          <button
+            className="button"
+            type="button"
+            disabled={!canSubmitFinal}
+            onClick={onClickSubmitFinal}
+          >
+            {isFinalSubmitted
+              ? "Final submitted and locked"
+              : submitting
+                ? "Submitting…"
+                : "Submit final COD closure"}
+          </button>
+        </div>
       </section>
 
-      {showRemarksModal && remittance && difference != null ? (
+      {showDifferenceModal && remittance && difference != null ? (
         <div className="modal-backdrop" role="presentation">
           <section className="modal-panel wide cash-recon-modal" role="dialog" aria-modal="true" aria-labelledby="remittance-diff-title">
             <div className="panel-head">
               <div>
-                <h2 id="remittance-diff-title">
-                  {shortBlocked ? "Cash short — override required" : "Cash difference with remittance"}
-                </h2>
+                <h2 id="remittance-diff-title">Cash difference with remittance</h2>
                 <p className="subtle">{stationCode} · {businessDate}</p>
               </div>
-              <button className="modal-close" type="button" onClick={() => setShowRemarksModal(false)} aria-label="Close">×</button>
+              <button className="modal-close" type="button" onClick={() => setShowDifferenceModal(false)} aria-label="Close">×</button>
             </div>
             <div className="panel-body">
               <div className="reconciliation-final-summary" style={{ marginBottom: 14 }}>
@@ -369,36 +453,88 @@ export function DepositRemittancePanel({
                   There {remittance.createdCount === 1 ? "is" : "are"} {remittance.createdCount} created remittance(s) still pending submission in SCC.
                 </p>
               ) : null}
-              {shortBlocked ? (
-                <p className="subtle" style={{ marginBottom: 12 }}>
-                  Shortfall is more than ₹{SHORT_BLOCK_RUPEES}. You must provide override remarks to unlock Submit final COD.
-                </p>
-              ) : (
-                <p className="subtle" style={{ marginBottom: 12 }}>
-                  Enter remarks explaining this difference before deposit can be marked validated.
-                </p>
-              )}
+              <p className="subtle" style={{ marginBottom: 12 }}>
+                Enter remarks explaining this difference before deposit can be marked validated.
+              </p>
               <label style={{ display: "grid", gap: 6 }}>
-                {shortBlocked ? "Override remarks" : "Remarks"}
+                Remarks
                 <textarea
                   className="field"
                   rows={3}
-                  value={remarks}
-                  onChange={(event) => setRemarks(event.target.value)}
-                  placeholder={shortBlocked
-                    ? "Why are you submitting with cash short more than ₹10 vs remittance?"
-                    : "Explain the cash vs remittance difference"}
+                  value={validateRemarks}
+                  onChange={(event) => setValidateRemarks(event.target.value)}
+                  placeholder="Explain the cash vs remittance difference"
                 />
               </label>
               <div className="form-actions" style={{ marginTop: 14 }}>
-                <button className="button secondary" type="button" onClick={() => setShowRemarksModal(false)}>Cancel</button>
+                <button className="button secondary" type="button" onClick={() => setShowDifferenceModal(false)}>Cancel</button>
                 <button
                   className="button"
                   type="button"
-                  disabled={!remarks.trim() || pending}
-                  onClick={confirmRemarks}
+                  disabled={!validateRemarks.trim() || savingValidation}
+                  onClick={() => void confirmDifferenceRemarks()}
                 >
-                  {pending ? "Saving…" : shortBlocked ? "Save override & validate" : "Save remarks & validate"}
+                  {savingValidation ? "Saving…" : "Save remarks & validate"}
+                </button>
+              </div>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {showShortOverrideModal && remittance && difference != null ? (
+        <div className="modal-backdrop" role="presentation">
+          <section className="modal-panel wide cash-recon-modal" role="dialog" aria-modal="true" aria-labelledby="short-override-title">
+            <div className="panel-head">
+              <div>
+                <h2 id="short-override-title">Cash short — override required</h2>
+                <p className="subtle">{stationCode} · {businessDate}</p>
+              </div>
+              <button
+                className="modal-close"
+                type="button"
+                disabled={submitting}
+                onClick={() => setShowShortOverrideModal(false)}
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </div>
+            <div className="panel-body">
+              <div className="alert danger" style={{ marginBottom: 14 }}>
+                <strong>Warning</strong>
+                <span>
+                  Page cash is ₹{currency(Math.abs(difference))} short vs remittance (more than ₹{SHORT_BLOCK_RUPEES}).
+                  Enter proper override remarks to continue.
+                </span>
+              </div>
+              <div className="reconciliation-final-summary" style={{ marginBottom: 14 }}>
+                <div><span>Page cash</span><strong>₹{currency(collectedCash)}</strong><small>Submitted on page</small></div>
+                <div><span>Remittance total</span><strong>₹{currency(remittance.remittanceTotalCash)}</strong><small>SCC remittance</small></div>
+                <div><span>Difference</span><strong>₹{currency(difference)}</strong><small>Page − remittance</small></div>
+              </div>
+              <label style={{ display: "grid", gap: 6 }}>
+                Override remarks
+                <textarea
+                  className="field"
+                  rows={3}
+                  value={submitOverrideRemarks}
+                  onChange={(event) => setSubmitOverrideRemarks(event.target.value)}
+                  placeholder="Why are you submitting with cash short more than ₹10 vs remittance?"
+                  disabled={submitting}
+                />
+              </label>
+              <div className="form-actions" style={{ marginTop: 14 }}>
+                <button className="button secondary" type="button" disabled={submitting} onClick={() => setShowShortOverrideModal(false)}>
+                  Cancel
+                </button>
+                <button
+                  className="button"
+                  type="button"
+                  disabled={!submitOverrideRemarks.trim() || submitting}
+                  onClick={() => void runFinalSubmit(submitOverrideRemarks.trim())}
+                >
+                  {submitting ? "Submitting…" : "Override and submit"}
                 </button>
               </div>
             </div>

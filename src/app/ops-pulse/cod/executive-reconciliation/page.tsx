@@ -24,7 +24,7 @@ import {
   queueCodClosureCheck,
   requestCodGateException,
   reviewCodGateException,
-  submitCodDayClosure
+  submitCodDayClosureForm
 } from "./actions";
 import { LiveCacheRefresh } from "./live-cache-refresh";
 import { loadCodDayClosures, loadCodManagerNotifications } from "@/lib/ops-pulse/cod-day-closure";
@@ -609,7 +609,7 @@ export default async function ExecutiveReconciliationPage(props: { searchParams?
                           <StatusPill status={selectedClosure?.is_final_submitted ? "Final submitted" : "Pending"} />
                         </div>
                         <p className="subtle">Final close locks all cash entries.</p>
-                        <form action={submitCodDayClosure} className="form-actions" style={{ marginTop: 12 }}>
+                        <form action={submitCodDayClosureForm} className="form-actions" style={{ marginTop: 12 }}>
                           <input type="hidden" name="return_href" value={returnHref} />
                           <input type="hidden" name="business_date" value={result.businessDate} />
                           <input type="hidden" name="location_id" value={defaultLocationId} />
