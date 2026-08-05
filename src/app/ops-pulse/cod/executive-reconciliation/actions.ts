@@ -13,7 +13,7 @@ import { requirePagePermission, type AuthorizationContext } from "@/lib/authoriz
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { finalizeCodClosure, notifyCodManager } from "@/lib/ops-pulse/cod-day-closure";
 import { canAccessCodAudit, writeCodAudit } from "@/lib/ops-pulse/cod-audit";
-import { fetchLiabilitySummary, isCashReconWorkerConfigured } from "@/lib/ops-pulse/cash-recon-worker";
+import { fetchLiabilitySummary, fetchRemittance, isCashReconWorkerConfigured } from "@/lib/ops-pulse/cash-recon-worker";
 
 const pagePath = "/ops-pulse/cod/executive-reconciliation";
 const publicPagePath = "/cod/executive-reconciliation";
@@ -1238,6 +1238,125 @@ export async function reviewCodGateException(formData: FormData) {
   }
 }
 
+export async function validateCodRemittanceDeposit(formData: FormData): Promise<CashEntryActionResult | void> {
+  const clientResponse = wantsClientResponse(formData);
+  const authorization = await requirePagePermission("cod_executive_reconciliation", "edit");
+  const companyId = requireCompanyId(authorization);
+  const returnHref = safeReturnHref(formData.get("return_href"));
+  try {
+    if (!isCashReconWorkerConfigured()) {
+      throw new Error("Cash recon worker is not configured.");
+    }
+    if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
+    const businessDate = required(formData.get("business_date"), "Business date");
+    const locationId = required(formData.get("location_id"), "Station");
+    const station = await stationForInput(companyId, locationId, null);
+    assertLocationAccess(authorization, station.id);
+    await assertClosureEditable(companyId, businessDate, station.id);
+
+    const overrideRemarks = clean(formData.get("remittance_override_remarks"))?.trim() ?? "";
+    const collectedCash = Number(String(formData.get("collected_cash") ?? "0").replace(/[,₹\s]/g, ""));
+    const collected = Number.isFinite(collectedCash) ? Number(collectedCash.toFixed(2)) : 0;
+
+    let remittance = await fetchRemittance({ stationCode: station.station_code, date: businessDate });
+    const payloadRaw = clean(formData.get("remittance_payload"));
+    if (payloadRaw) {
+      try {
+        const parsed = JSON.parse(payloadRaw) as typeof remittance;
+        if (parsed && typeof parsed === "object" && Array.isArray(parsed.submitted)) {
+          remittance = parsed;
+        }
+      } catch {
+        // Prefer live fetch when payload is invalid.
+      }
+    }
+
+    const difference = Number((collected - remittance.remittanceTotalCash).toFixed(2));
+    const needsRemarks = Math.abs(difference) >= 0.01 || remittance.createdCount > 0;
+    if (needsRemarks && !overrideRemarks) {
+      throw new Error(
+        difference < -10
+          ? `Cash is short by more than ₹10 vs remittance (₹${Math.abs(difference).toFixed(2)}). Override remarks are required.`
+          : "Remarks are required when cash differs from remittance total or remittance is still pending."
+      );
+    }
+    if (difference < -10 && !overrideRemarks) {
+      throw new Error(
+        `Cash is short by more than ₹10 vs remittance (₹${Math.abs(difference).toFixed(2)}). Override remarks are required.`
+      );
+    }
+
+    const now = new Date().toISOString();
+    const existing = await supabaseAdmin
+      .from("cod_day_closures")
+      .select("id, validation_snapshot, driver_check_status")
+      .eq("company_id", companyId)
+      .eq("business_date", businessDate)
+      .eq("location_id", station.id)
+      .maybeSingle();
+    if (existing.error) throw new Error(existing.error.message);
+    if (!existing.data) throw new Error("Submit cash and complete driver reconciliation before validating deposit.");
+    if (!["Passed", "Exception approved"].includes(String(existing.data.driver_check_status))) {
+      throw new Error("Driver reconciliation must pass before validating deposit.");
+    }
+
+    const snapshot = (existing.data.validation_snapshot && typeof existing.data.validation_snapshot === "object"
+      ? existing.data.validation_snapshot
+      : {}) as Record<string, unknown>;
+
+    const saved = await supabaseAdmin.from("cod_day_closures").update({
+      amazon_open_remittance_expected: remittance.remittanceTotalCash,
+      amazon_open_remittance_count: remittance.remittanceCodes.length || remittance.submittedCount,
+      difference_amount: difference,
+      no_deposit_liability: remittance.createdCount === 0,
+      deposit_check_status: "Passed",
+      validation_snapshot: {
+        ...snapshot,
+        remittance: {
+          ...remittance,
+          difference_amount: difference,
+          collected_cash: collected,
+          override_remarks: overrideRemarks || null,
+          validated_at: now,
+          validated_by: authorization.userId
+        }
+      },
+      updated_at: now
+    }).eq("id", existing.data.id);
+    if (saved.error) throw new Error(saved.error.message);
+
+    await writeCodAudit({
+      action: "Remittance deposit validated",
+      after: {
+        remittance_total_cash: remittance.remittanceTotalCash,
+        collected_cash: collected,
+        difference_amount: difference,
+        created_count: remittance.createdCount,
+        submitted_count: remittance.submittedCount,
+        override_remarks: overrideRemarks || null
+      },
+      authorization,
+      businessDate,
+      closureId: existing.data.id,
+      locationId: station.id,
+      stationCode: station.station_code
+    });
+
+    revalidatePath(pagePath);
+    revalidatePath("/ops-pulse/cod");
+    const notice = Math.abs(difference) < 0.01
+      ? `Deposit remittance validated for ${station.station_code}. Total ₹${remittance.remittanceTotalCash.toFixed(2)}.`
+      : `Deposit remittance validated with difference ₹${difference.toFixed(2)} for ${station.station_code}.`;
+    if (clientResponse) return { ok: true, notice } satisfies CashEntryActionResult;
+    redirectWithFlash({ notice }, returnHref);
+  } catch (error) {
+    if (isNextRedirectError(error)) throw error;
+    const message = error instanceof Error ? error.message : "Unable to validate remittance deposit.";
+    if (clientResponse) return { ok: false, error: message } satisfies CashEntryActionResult;
+    redirectWithFlash({ error: message }, returnHref);
+  }
+}
+
 export async function submitCodDayClosure(formData: FormData) {
   const authorization = await requirePagePermission("cod_executive_reconciliation", "edit");
   const companyId = requireCompanyId(authorization);
@@ -1247,12 +1366,14 @@ export async function submitCodDayClosure(formData: FormData) {
     const locationId = required(formData.get("location_id"), "Station");
     const station = await stationForInput(companyId, locationId, null);
     assertLocationAccess(authorization, station.id);
+    const remittanceOverrideRemarks = clean(formData.get("remittance_override_remarks"));
     const result = await finalizeCodClosure({
       businessDate,
       companyId,
       locationId,
       stationCode: station.station_code,
-      userId: authorization.userId
+      userId: authorization.userId,
+      remittanceOverrideRemarks
     });
     const closure = await supabaseAdmin
       ?.from("cod_day_closures")
@@ -1263,7 +1384,12 @@ export async function submitCodDayClosure(formData: FormData) {
       .maybeSingle();
     await writeCodAudit({
       action: "Final COD closure submitted",
-      after: { collected_cod: result.collectedCod, difference_amount: result.difference, locked: true },
+      after: {
+        collected_cod: result.collectedCod,
+        difference_amount: result.difference,
+        locked: true,
+        remittance_override_remarks: remittanceOverrideRemarks || null
+      },
       authorization,
       businessDate,
       closureId: closure?.data?.id ?? null,

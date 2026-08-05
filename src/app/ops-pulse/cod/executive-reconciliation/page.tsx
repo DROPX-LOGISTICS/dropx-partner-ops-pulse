@@ -31,6 +31,7 @@ import { loadCodDayClosures, loadCodManagerNotifications } from "@/lib/ops-pulse
 import { canAccessCodAudit, loadCodAuditRows } from "@/lib/ops-pulse/cod-audit";
 import { PortalCheckProgress } from "./portal-check-progress";
 import { DriverReconCashPanel } from "./driver-recon-cash-panel";
+import { DepositRemittancePanel } from "./deposit-remittance-panel";
 import { resolveOperatingContext } from "@/lib/ops-pulse/operating-context";
 import {
   expectedFromCashReconRaw,
@@ -191,6 +192,8 @@ export default async function ExecutiveReconciliationPage(props: { searchParams?
   const selectedClosure = closures.find((closure) => closure.location_id === defaultLocationId) ?? null;
   const closureSnapshot = objectValue(selectedClosure?.validation_snapshot);
   const cashSubmissionSnapshot = objectValue(closureSnapshot.cash_submission);
+  const remittanceSnapshot = objectValue(closureSnapshot.remittance);
+  const remittanceOverrideRemarks = String(remittanceSnapshot.override_remarks ?? "").trim();
   const cashSubmitted = Boolean(cashSubmissionSnapshot.submitted_at) && selectedClosure?.submission_status !== "Draft";
   const submittedDifference = amountValue(String(cashSubmissionSnapshot.difference_amount ?? 0));
   const cashSubmissionStatus = !cashSubmitted
@@ -226,10 +229,18 @@ export default async function ExecutiveReconciliationPage(props: { searchParams?
     selectedClosure.no_deposit_liability &&
     selectedClosure.amazon_open_remittance_count > 0 &&
     Math.abs(depositAmountDifference) <= 1;
-  const depositCleared = depositMatched || selectedClosure?.deposit_check_status === "Exception approved";
-  const depositDisplayStatus = selectedClosure?.deposit_check_status === "Passed" && !depositMatched
-    ? "Pending"
-    : selectedClosure?.deposit_check_status ?? "Locked";
+  const remittanceDepositCleared = cashReconReady && (
+    selectedClosure?.deposit_check_status === "Passed" ||
+    selectedClosure?.deposit_check_status === "Exception approved"
+  );
+  const depositCleared = cashReconReady
+    ? Boolean(remittanceDepositCleared)
+    : depositMatched || selectedClosure?.deposit_check_status === "Exception approved";
+  const depositDisplayStatus = cashReconReady
+    ? (depositCleared ? "Passed" : selectedClosure?.deposit_check_status ?? "Not validated")
+    : selectedClosure?.deposit_check_status === "Passed" && !depositMatched
+      ? "Pending"
+      : selectedClosure?.deposit_check_status ?? "Locked";
   const canManagerReview = auditAllowed;
   const requestedStep = ["1", "2", "3"].includes(String(searchParams?.step)) ? Number(searchParams?.step) : 1;
   const savedProviderEmployeeIds = savedRows
@@ -520,76 +531,95 @@ export default async function ExecutiveReconciliationPage(props: { searchParams?
                     ) : null}
                   </section>
 
-                  <section className={`reconciliation-gate ${!driverCleared ? "locked" : ""} ${activeStep !== 3 ? "reconciliation-step-hidden" : ""}`}>
-                    <div className="reconciliation-gate-head">
-                      <div><span>Validation 2</span><strong>Bank deposit</strong></div>
-                      <StatusPill status={depositDisplayStatus} />
+                  {cashReconReady && selectedStation ? (
+                    <div className={activeStep !== 3 ? "reconciliation-step-hidden" : ""}>
+                      <DepositRemittancePanel
+                        stationCode={selectedStation.station_code}
+                        businessDate={result.businessDate}
+                        locationId={defaultLocationId}
+                        returnHref={returnHref}
+                        collectedCash={collectedTotal}
+                        canEdit={permission.canEdit}
+                        driverCleared={Boolean(driverCleared)}
+                        isFinalSubmitted={Boolean(selectedClosure?.is_final_submitted)}
+                        depositAlreadyCleared={Boolean(depositCleared)}
+                        initialOverrideRemarks={remittanceOverrideRemarks}
+                      />
                     </div>
-                    <PortalCheckProgress
-                      attemptCount={Number(depositRun?.attempt_count ?? 0)}
-                      checkLabel="SCC Bank Deposit"
-                      lastCheckedAt={depositRun?.last_checked_at ?? null}
-                      nextCheckAt={depositRun?.next_check_at ?? null}
-                      summary={depositRun?.summary ?? null}
-                      status={driverCleared ? depositRun?.status ?? "Not run" : "Locked"}
-                    />
-                    <form action={queueCodClosureCheck} className="form-actions" style={{ marginTop: 12 }}>
-                      <input type="hidden" name="return_href" value={returnHref} />
-                      <input type="hidden" name="business_date" value={result.businessDate} />
-                      <input type="hidden" name="location_id" value={defaultLocationId} />
-                      <input type="hidden" name="check_type" value="prepared_deposit" />
-                      <SubmitButton className="button secondary" disabled={!permission.canEdit || !driverCleared || selectedClosure?.is_final_submitted}>
-                        {driverCleared ? "Validate deposit" : "Driver recon required"}
-                      </SubmitButton>
-                    </form>
-                    {selectedClosure && ["Pending", "Error", "Exception rejected"].includes(depositDisplayStatus) ? (
-                      <details className="reconciliation-exception">
-                        <summary>Request exception</summary>
-                        <form action={requestCodGateException} className="form-grid three">
+                  ) : (
+                    <>
+                      <section className={`reconciliation-gate ${!driverCleared ? "locked" : ""} ${activeStep !== 3 ? "reconciliation-step-hidden" : ""}`}>
+                        <div className="reconciliation-gate-head">
+                          <div><span>Validation 2</span><strong>Bank deposit</strong></div>
+                          <StatusPill status={depositDisplayStatus} />
+                        </div>
+                        <PortalCheckProgress
+                          attemptCount={Number(depositRun?.attempt_count ?? 0)}
+                          checkLabel="SCC Bank Deposit"
+                          lastCheckedAt={depositRun?.last_checked_at ?? null}
+                          nextCheckAt={depositRun?.next_check_at ?? null}
+                          summary={depositRun?.summary ?? null}
+                          status={driverCleared ? depositRun?.status ?? "Not run" : "Locked"}
+                        />
+                        <form action={queueCodClosureCheck} className="form-actions" style={{ marginTop: 12 }}>
                           <input type="hidden" name="return_href" value={returnHref} />
                           <input type="hidden" name="business_date" value={result.businessDate} />
                           <input type="hidden" name="location_id" value={defaultLocationId} />
-                          <input type="hidden" name="gate" value="deposit" />
-                          <label className="span-2">Reason<textarea className="field" name="exception_reason" rows={2} required /></label>
-                          <div className="form-actions align-right"><SubmitButton>Send to manager</SubmitButton></div>
+                          <input type="hidden" name="check_type" value="prepared_deposit" />
+                          <SubmitButton className="button secondary" disabled={!permission.canEdit || !driverCleared || selectedClosure?.is_final_submitted}>
+                            {driverCleared ? "Validate deposit" : "Driver recon required"}
+                          </SubmitButton>
                         </form>
-                      </details>
-                    ) : null}
-                    {selectedClosure?.deposit_check_status === "Exception requested" ? (
-                      <div className="alert danger" style={{ marginTop: 12 }}>
-                        <strong>Manager approval pending</strong>
-                        <span>{selectedClosure.deposit_exception_reason}</span>
-                      </div>
-                    ) : null}
-                    {selectedClosure?.deposit_check_status === "Exception requested" && canManagerReview ? (
-                      <form action={reviewCodGateException} className="form-grid three" style={{ marginTop: 12 }}>
-                        <input type="hidden" name="return_href" value={returnHref} />
-                        <input type="hidden" name="closure_id" value={selectedClosure.id} />
-                        <input type="hidden" name="gate" value="deposit" />
-                        <label className="span-2">Manager remarks<input className="field" name="manager_remarks" placeholder="Approval or rejection remarks" /></label>
-                        <div className="form-actions align-right">
-                          <button className="button secondary" name="decision" value="reject">Reject</button>
-                          <button className="button" name="decision" value="approve">Approve exception</button>
-                        </div>
-                      </form>
-                    ) : null}
-                  </section>
+                        {selectedClosure && ["Pending", "Error", "Exception rejected"].includes(depositDisplayStatus) ? (
+                          <details className="reconciliation-exception">
+                            <summary>Request exception</summary>
+                            <form action={requestCodGateException} className="form-grid three">
+                              <input type="hidden" name="return_href" value={returnHref} />
+                              <input type="hidden" name="business_date" value={result.businessDate} />
+                              <input type="hidden" name="location_id" value={defaultLocationId} />
+                              <input type="hidden" name="gate" value="deposit" />
+                              <label className="span-2">Reason<textarea className="field" name="exception_reason" rows={2} required /></label>
+                              <div className="form-actions align-right"><SubmitButton>Send to manager</SubmitButton></div>
+                            </form>
+                          </details>
+                        ) : null}
+                        {selectedClosure?.deposit_check_status === "Exception requested" ? (
+                          <div className="alert danger" style={{ marginTop: 12 }}>
+                            <strong>Manager approval pending</strong>
+                            <span>{selectedClosure.deposit_exception_reason}</span>
+                          </div>
+                        ) : null}
+                        {selectedClosure?.deposit_check_status === "Exception requested" && canManagerReview ? (
+                          <form action={reviewCodGateException} className="form-grid three" style={{ marginTop: 12 }}>
+                            <input type="hidden" name="return_href" value={returnHref} />
+                            <input type="hidden" name="closure_id" value={selectedClosure.id} />
+                            <input type="hidden" name="gate" value="deposit" />
+                            <label className="span-2">Manager remarks<input className="field" name="manager_remarks" placeholder="Approval or rejection remarks" /></label>
+                            <div className="form-actions align-right">
+                              <button className="button secondary" name="decision" value="reject">Reject</button>
+                              <button className="button" name="decision" value="approve">Approve exception</button>
+                            </div>
+                          </form>
+                        ) : null}
+                      </section>
 
-                  <section className={`reconciliation-gate final ${!depositCleared ? "locked" : ""} ${activeStep !== 3 ? "reconciliation-step-hidden" : ""}`}>
-                    <div className="reconciliation-gate-head">
-                      <div><span>Final</span><strong>Close station day</strong></div>
-                      <StatusPill status={selectedClosure?.is_final_submitted ? "Final submitted" : "Pending"} />
-                    </div>
-                    <p className="subtle">Final close locks all cash entries.</p>
-                    <form action={submitCodDayClosure} className="form-actions" style={{ marginTop: 12 }}>
-                      <input type="hidden" name="return_href" value={returnHref} />
-                      <input type="hidden" name="business_date" value={result.businessDate} />
-                      <input type="hidden" name="location_id" value={defaultLocationId} />
-                      <SubmitButton disabled={!permission.canEdit || !driverCleared || !depositCleared || selectedClosure?.is_final_submitted}>
-                        {selectedClosure?.is_final_submitted ? "Final submitted and locked" : "Submit final COD closure"}
-                      </SubmitButton>
-                    </form>
-                  </section>
+                      <section className={`reconciliation-gate final ${!depositCleared ? "locked" : ""} ${activeStep !== 3 ? "reconciliation-step-hidden" : ""}`}>
+                        <div className="reconciliation-gate-head">
+                          <div><span>Final</span><strong>Close station day</strong></div>
+                          <StatusPill status={selectedClosure?.is_final_submitted ? "Final submitted" : "Pending"} />
+                        </div>
+                        <p className="subtle">Final close locks all cash entries.</p>
+                        <form action={submitCodDayClosure} className="form-actions" style={{ marginTop: 12 }}>
+                          <input type="hidden" name="return_href" value={returnHref} />
+                          <input type="hidden" name="business_date" value={result.businessDate} />
+                          <input type="hidden" name="location_id" value={defaultLocationId} />
+                          <SubmitButton disabled={!permission.canEdit || !driverCleared || !depositCleared || selectedClosure?.is_final_submitted}>
+                            {selectedClosure?.is_final_submitted ? "Final submitted and locked" : "Submit final COD closure"}
+                          </SubmitButton>
+                        </form>
+                      </section>
+                    </>
+                  )}
                 </div>
                 </>
               ) : <p className="subtle">Select one station to submit its day closure.</p>}

@@ -124,6 +124,55 @@ export type LiabilitySummaryNormalized = {
   isClear: boolean;
 };
 
+export type RemittanceMoney = {
+  unit?: string | null;
+  value?: number | null;
+};
+
+export type RemittanceStationVarianceItem = {
+  amount: number;
+  reason: string;
+  type: string;
+};
+
+export type RemittanceRowNormalized = {
+  remittanceCode: string;
+  remittanceId: string;
+  creationDate: number | null;
+  lastUpdated: number | null;
+  submissionDate: number | null;
+  createdBy: string | null;
+  submittedBy: string | null;
+  status: string;
+  expectedAmount: number;
+  actualAmount: number;
+  paymentMethod: string | null;
+  variance: number;
+  ttLink: string | null;
+  transactionId: string | null;
+  isVerified: boolean | null;
+  stationVarianceList: RemittanceStationVarianceItem[];
+};
+
+export type RemittanceSummaryNormalized = {
+  status: string;
+  stationCode: string;
+  date: string;
+  sessionSource: string | null;
+  remittanceTotalCash: number;
+  created: RemittanceRowNormalized[];
+  createdCount: number;
+  createdTotal: number;
+  submitted: RemittanceRowNormalized[];
+  submittedCount: number;
+  submittedTotal: number;
+  remittanceCodes: string[];
+  dateRange: {
+    startTime: number | null;
+    endTime: number | null;
+  };
+};
+
 export function moneyValue(value: CashMoney | number | string | null | undefined): number {
   if (typeof value === "number") return Number.isFinite(value) ? Number(value.toFixed(2)) : 0;
   if (typeof value === "string") {
