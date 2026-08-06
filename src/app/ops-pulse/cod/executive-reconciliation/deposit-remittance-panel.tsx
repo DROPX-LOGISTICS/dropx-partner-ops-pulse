@@ -2,14 +2,24 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { RemittanceRowNormalized, RemittanceSummaryNormalized } from "@/lib/ops-pulse/cash-recon-types";
+import type {
+  LiabilitySummaryNormalized,
+  RemittanceRowNormalized,
+  RemittanceSummaryNormalized
+} from "@/lib/ops-pulse/cash-recon-types";
+import { readLatestDriverReconCache } from "@/lib/ops-pulse/driver-recon-client-cache";
 import { submitCodDayClosure, validateCodRemittanceDeposit } from "./actions";
 
 const SHORT_BLOCK_RUPEES = 10;
 const VALIDATE_COOLDOWN_MS = 10_000;
+const MATCH_EPSILON = 0.01;
 
 function currency(value: number) {
   return value.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function nearlyEqual(a: number, b: number, epsilon = MATCH_EPSILON) {
+  return Math.abs(a - b) < epsilon;
 }
 
 function formatEpoch(ms: number | null) {
@@ -111,13 +121,15 @@ export function DepositRemittancePanel({
   const [checking, setChecking] = useState(false);
   const [savingValidation, setSavingValidation] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [checkingLiability, setCheckingLiability] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [remittance, setRemittance] = useState<RemittanceSummaryNormalized | null>(null);
+  const [expectedCashTotal, setExpectedCashTotal] = useState<number | null>(null);
   const [validateRemarks, setValidateRemarks] = useState(initialOverrideRemarks);
-  const [submitOverrideRemarks, setSubmitOverrideRemarks] = useState("");
   const [showDifferenceModal, setShowDifferenceModal] = useState(false);
-  const [showShortOverrideModal, setShowShortOverrideModal] = useState(false);
+  const [showLiabilityModal, setShowLiabilityModal] = useState(false);
+  const [liability, setLiability] = useState<LiabilitySummaryNormalized | null>(null);
   const [depositValidated, setDepositValidated] = useState(depositAlreadyCleared);
   const [cooldownUntil, setCooldownUntil] = useState(0);
   const [cooldownLeftSec, setCooldownLeftSec] = useState(0);
@@ -146,16 +158,50 @@ export function DepositRemittancePanel({
     return Number((collectedCash - remittance.remittanceTotalCash).toFixed(2));
   }, [collectedCash, remittance]);
 
-  const needsDifferenceRemarks = difference != null && Math.abs(difference) >= 0.01;
+  const expectedVsRemittanceDiff = useMemo(() => {
+    if (!remittance || expectedCashTotal == null) return null;
+    return Number((remittance.remittanceTotalCash - expectedCashTotal).toFixed(2));
+  }, [expectedCashTotal, remittance]);
+
+  const needsDifferenceRemarks = difference != null && Math.abs(difference) >= MATCH_EPSILON;
   const isShortOverLimit = difference != null && difference < -SHORT_BLOCK_RUPEES;
+  const expectedCashMismatch = Boolean(
+    remittance
+    && (expectedCashTotal == null
+      || (expectedVsRemittanceDiff != null && Math.abs(expectedVsRemittanceDiff) >= MATCH_EPSILON))
+  );
   const hasPendingCreated = Boolean(remittance && remittance.createdCount > 0);
+  const submitBlocked = isShortOverLimit || expectedCashMismatch;
   const validateBusy = checking || savingValidation;
   const validateOnCooldown = cooldownLeftSec > 0;
   const canValidate = canEdit && driverCleared && !isFinalSubmitted && !validateBusy && !validateOnCooldown && !submitting;
-  const canSubmitFinal = canEdit && driverCleared && depositValidated && !isFinalSubmitted && !submitting && !validateBusy;
+  const canSubmitFinal = canEdit
+    && driverCleared
+    && depositValidated
+    && !isFinalSubmitted
+    && !submitting
+    && !validateBusy
+    && !submitBlocked
+    && Boolean(remittance);
 
   function startCooldown() {
     setCooldownUntil(Date.now() + VALIDATE_COOLDOWN_MS);
+  }
+
+  async function loadExpectedCashTotal(): Promise<number | null> {
+    const cached = readLatestDriverReconCache({ stationCode, businessDate, locationId });
+    const cachedTotal = Number(cached?.expectedCash?.totalReceived);
+    if (Number.isFinite(cachedTotal)) return Number(cachedTotal.toFixed(2));
+
+    const response = await fetch("/api/ops-pulse/cod/cash-recon/driver-reconciliation", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ stationCode, date: businessDate, locationId })
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload?.error || "Unable to load expected cash.");
+    const total = Number(payload?.expectedCash?.totalReceived);
+    return Number.isFinite(total) ? Number(total.toFixed(2)) : null;
   }
 
   async function persistValidation(summary: RemittanceSummaryNormalized, overrideRemarks: string) {
@@ -201,22 +247,33 @@ export function DepositRemittancePanel({
     setError(null);
     setNotice(null);
     setShowDifferenceModal(false);
-    setShowShortOverrideModal(false);
+    setShowLiabilityModal(false);
     setChecking(true);
     try {
-      const response = await fetch("/api/ops-pulse/cod/cash-recon/remittance", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ stationCode, date: businessDate })
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload?.error || "Unable to load remittance.");
+      const [remittanceResponse, expectedTotal] = await Promise.all([
+        fetch("/api/ops-pulse/cod/cash-recon/remittance", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ stationCode, date: businessDate })
+        }),
+        loadExpectedCashTotal()
+      ]);
+      const payload = await remittanceResponse.json().catch(() => ({}));
+      if (!remittanceResponse.ok) throw new Error(payload?.error || "Unable to load remittance.");
       const summary = payload as RemittanceSummaryNormalized;
       setRemittance(summary);
+      setExpectedCashTotal(expectedTotal);
+
       const diff = Number((collectedCash - summary.remittanceTotalCash).toFixed(2));
-      const needsRemarks = Math.abs(diff) >= 0.01 || summary.createdCount > 0;
-      // Short > ₹10 is handled on Submit via override popup — still allow validate.
-      if (needsRemarks && !(diff < -SHORT_BLOCK_RUPEES)) {
+      const shortBlocked = diff < -SHORT_BLOCK_RUPEES;
+      const expectedMismatch = expectedTotal != null
+        && !nearlyEqual(summary.remittanceTotalCash, expectedTotal);
+      const needsRemarks = (Math.abs(diff) >= MATCH_EPSILON || summary.createdCount > 0) && !shortBlocked;
+
+      if (shortBlocked || expectedMismatch) {
+        // Still persist so tables/status are saved, but submit stays disabled until cleared.
+        await persistValidation(summary, validateRemarks.trim());
+      } else if (needsRemarks) {
         setDepositValidated(false);
         setShowDifferenceModal(true);
       } else {
@@ -236,8 +293,8 @@ export function DepositRemittancePanel({
     await persistValidation(remittance, validateRemarks.trim());
   }
 
-  async function runFinalSubmit(overrideRemarks: string) {
-    if (submitting || !depositValidated || isFinalSubmitted) return;
+  async function runFinalSubmit() {
+    if (submitting || !depositValidated || isFinalSubmitted || submitBlocked) return;
     setError(null);
     setNotice(null);
     setSubmitting(true);
@@ -246,7 +303,7 @@ export function DepositRemittancePanel({
       formData.set("return_href", returnHref);
       formData.set("business_date", businessDate);
       formData.set("location_id", locationId);
-      formData.set("remittance_override_remarks", overrideRemarks);
+      formData.set("remittance_override_remarks", validateRemarks.trim());
       formData.set("response_mode", "client");
       const result = await submitCodDayClosure(formData);
       if (!result || !("ok" in result) || !result.ok) {
@@ -254,7 +311,7 @@ export function DepositRemittancePanel({
         setSubmitting(false);
         return;
       }
-      setShowShortOverrideModal(false);
+      setShowLiabilityModal(false);
       setNotice(result.notice || "COD day closure submitted.");
       router.refresh();
     } catch (err) {
@@ -263,17 +320,36 @@ export function DepositRemittancePanel({
     }
   }
 
-  function onClickSubmitFinal() {
+  async function openLiabilityGate() {
     if (!canSubmitFinal) {
-      setError(depositValidated ? null : "Validate deposit before submitting final COD closure.");
+      setError(
+        !depositValidated
+          ? "Validate deposit before submitting final COD closure."
+          : submitBlocked
+            ? "Clear short cash / remittance vs expected cash mismatch before submitting."
+            : null
+      );
       return;
     }
-    if (isShortOverLimit) {
-      setSubmitOverrideRemarks("");
-      setShowShortOverrideModal(true);
-      return;
+    setError(null);
+    setCheckingLiability(true);
+    setShowLiabilityModal(true);
+    setLiability(null);
+    try {
+      const response = await fetch("/api/ops-pulse/cod/cash-recon/liability-summary", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ stationCode, date: businessDate })
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload?.error || "Unable to check SCC liability.");
+      setLiability(payload as LiabilitySummaryNormalized);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to check SCC liability.");
+      setShowLiabilityModal(false);
+    } finally {
+      setCheckingLiability(false);
     }
-    void runFinalSubmit(validateRemarks.trim());
   }
 
   const validateLabel = !driverCleared
@@ -344,16 +420,21 @@ export function DepositRemittancePanel({
                 <small>{remittance.submittedCount} submitted · {remittance.createdCount} created</small>
               </div>
               <div>
+                <span>Expected cash (SCC)</span>
+                <strong>{expectedCashTotal == null ? "—" : `₹${currency(expectedCashTotal)}`}</strong>
+                <small>expectedCash.totalReceived</small>
+              </div>
+              <div>
                 <span>Cash submitted (page)</span>
                 <strong>₹{currency(collectedCash)}</strong>
                 <small>Saved collected COD</small>
               </div>
               <div>
-                <span>Difference</span>
-                <strong style={{ color: difference != null && Math.abs(difference) >= 0.01 ? "var(--danger, #b42318)" : undefined }}>
+                <span>Page − remittance</span>
+                <strong style={{ color: difference != null && Math.abs(difference) >= MATCH_EPSILON ? "var(--danger, #b42318)" : undefined }}>
                   ₹{currency(difference ?? 0)}
                 </strong>
-                <small>Page − remittance</small>
+                <small>Short &gt; ₹{SHORT_BLOCK_RUPEES} blocks submit</small>
               </div>
             </div>
 
@@ -366,13 +447,27 @@ export function DepositRemittancePanel({
 
             {isShortOverLimit ? (
               <div className="alert danger" style={{ marginTop: 12 }}>
-                <strong>Short over ₹{SHORT_BLOCK_RUPEES}</strong>
+                <strong>Submit disabled — short over ₹{SHORT_BLOCK_RUPEES}</strong>
                 <span>
                   Cash on this page is ₹{currency(Math.abs(difference ?? 0))} below remittance total.
-                  When you click Submit final COD, you must confirm with override remarks.
+                  Clear the short in SCC / cash entry, then Validate again.
                 </span>
               </div>
-            ) : needsDifferenceRemarks ? (
+            ) : null}
+
+            {expectedCashMismatch ? (
+              <div className="alert danger" style={{ marginTop: 12 }}>
+                <strong>Submit disabled — remittance ≠ expected cash</strong>
+                <span>
+                  Remittance ₹{currency(remittance.remittanceTotalCash)} does not match expectedCash.totalReceived
+                  ₹{currency(expectedCashTotal ?? 0)}
+                  {expectedVsRemittanceDiff != null ? ` (difference ₹${currency(expectedVsRemittanceDiff)})` : ""}.
+                  Clear this in SCC, then Validate again.
+                </span>
+              </div>
+            ) : null}
+
+            {!isShortOverLimit && needsDifferenceRemarks ? (
               <div className="alert" style={{ marginTop: 12 }}>
                 <strong>Cash difference</strong>
                 <span>Difference of ₹{currency(difference ?? 0)} — remarks required when validating.</span>
@@ -404,30 +499,44 @@ export function DepositRemittancePanel({
         )}
       </section>
 
-      <section className={`reconciliation-gate final ${!depositValidated ? "locked" : ""}`} style={{ marginTop: 16 }}>
+      <section className={`reconciliation-gate final ${!canSubmitFinal ? "locked" : ""}`} style={{ marginTop: 16 }}>
         <div className="reconciliation-gate-head">
           <div><span>Final</span><strong>Close station day</strong></div>
-          <span className="count-badge">{isFinalSubmitted ? "Final submitted" : depositValidated ? "Ready" : "Pending validation"}</span>
+          <span className="count-badge">
+            {isFinalSubmitted
+              ? "Final submitted"
+              : canSubmitFinal
+                ? "Ready"
+                : submitBlocked
+                  ? "Blocked"
+                  : "Pending validation"}
+          </span>
         </div>
-        <p className="subtle">Final close locks all cash entries after remittance validation.</p>
-        {isShortOverLimit ? (
+        <p className="subtle">Final close locks all cash entries after remittance validation and clear liability.</p>
+        {submitBlocked ? (
           <div className="alert danger" style={{ marginTop: 10 }}>
-            <strong>Override required on submit</strong>
-            <span>Shortfall exceeds ₹{SHORT_BLOCK_RUPEES}. Submit will open a popup for override remarks.</span>
+            <strong>Submit locked</strong>
+            <span>
+              {isShortOverLimit ? `Clear short cash over ₹${SHORT_BLOCK_RUPEES}. ` : ""}
+              {expectedCashMismatch ? "Match remittance total to expectedCash.totalReceived. " : ""}
+              Then Validate again to unlock.
+            </span>
           </div>
         ) : null}
         <div className="form-actions" style={{ marginTop: 12 }}>
           <button
             className="button"
             type="button"
-            disabled={!canSubmitFinal}
-            onClick={onClickSubmitFinal}
+            disabled={!canSubmitFinal || checkingLiability}
+            onClick={() => void openLiabilityGate()}
           >
             {isFinalSubmitted
               ? "Final submitted and locked"
-              : submitting
-                ? "Submitting…"
-                : "Submit final COD closure"}
+              : checkingLiability
+                ? "Checking liability…"
+                : submitting
+                  ? "Submitting…"
+                  : "Submit final COD closure"}
           </button>
         </div>
       </section>
@@ -482,61 +591,71 @@ export function DepositRemittancePanel({
         </div>
       ) : null}
 
-      {showShortOverrideModal && remittance && difference != null ? (
+      {showLiabilityModal ? (
         <div className="modal-backdrop" role="presentation">
-          <section className="modal-panel wide cash-recon-modal" role="dialog" aria-modal="true" aria-labelledby="short-override-title">
+          <section className="modal-panel wide cash-recon-modal" role="dialog" aria-modal="true" aria-labelledby="liability-remind-title">
             <div className="panel-head">
               <div>
-                <h2 id="short-override-title">Cash short — override required</h2>
+                <h2 id="liability-remind-title">Complete liability before COD submit</h2>
                 <p className="subtle">{stationCode} · {businessDate}</p>
               </div>
               <button
                 className="modal-close"
                 type="button"
                 disabled={submitting}
-                onClick={() => setShowShortOverrideModal(false)}
+                onClick={() => setShowLiabilityModal(false)}
                 aria-label="Close"
               >
                 ×
               </button>
             </div>
             <div className="panel-body">
-              <div className="alert danger" style={{ marginBottom: 14 }}>
-                <strong>Warning</strong>
-                <span>
-                  Page cash is ₹{currency(Math.abs(difference))} short vs remittance (more than ₹{SHORT_BLOCK_RUPEES}).
-                  Enter proper override remarks to continue.
-                </span>
-              </div>
-              <div className="reconciliation-final-summary" style={{ marginBottom: 14 }}>
-                <div><span>Page cash</span><strong>₹{currency(collectedCash)}</strong><small>Submitted on page</small></div>
-                <div><span>Remittance total</span><strong>₹{currency(remittance.remittanceTotalCash)}</strong><small>SCC remittance</small></div>
-                <div><span>Difference</span><strong>₹{currency(difference)}</strong><small>Page − remittance</small></div>
-              </div>
-              <label style={{ display: "grid", gap: 6 }}>
-                Override remarks
-                <textarea
-                  className="field"
-                  rows={3}
-                  value={submitOverrideRemarks}
-                  onChange={(event) => setSubmitOverrideRemarks(event.target.value)}
-                  placeholder="Why are you submitting with cash short more than ₹10 vs remittance?"
-                  disabled={submitting}
-                />
-              </label>
-              <div className="form-actions" style={{ marginTop: 14 }}>
-                <button className="button secondary" type="button" disabled={submitting} onClick={() => setShowShortOverrideModal(false)}>
-                  Cancel
-                </button>
-                <button
-                  className="button"
-                  type="button"
-                  disabled={!submitOverrideRemarks.trim() || submitting}
-                  onClick={() => void runFinalSubmit(submitOverrideRemarks.trim())}
-                >
-                  {submitting ? "Submitting…" : "Override and submit"}
-                </button>
-              </div>
+              <p className="subtle" style={{ marginBottom: 12 }}>
+                Station cash liability in SCC must be clear (₹0 short/excess) before you can submit final COD.
+              </p>
+              {checkingLiability || !liability ? (
+                <p className="subtle">Checking SCC liability…</p>
+              ) : liability.isClear ? (
+                <>
+                  <div className="alert" style={{ marginBottom: 14 }}>
+                    <strong>Liability clear</strong>
+                    <span>
+                      Expected ₹{currency(liability.cashSummary.expectedAmount)} · Actual ₹{currency(liability.cashSummary.actualAmount)} ·
+                      Short/excess ₹{currency(liability.cashSummary.shortExcessAmount)}.
+                    </span>
+                  </div>
+                  <div className="form-actions">
+                    <button className="button secondary" type="button" disabled={submitting} onClick={() => setShowLiabilityModal(false)}>
+                      Cancel
+                    </button>
+                    <button className="button" type="button" disabled={submitting} onClick={() => void runFinalSubmit()}>
+                      {submitting ? "Submitting…" : "Submit final COD"}
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="alert danger" style={{ marginBottom: 14 }}>
+                    <strong>Liability still open</strong>
+                    <span>
+                      Expected ₹{currency(liability.cashSummary.expectedAmount)} · Actual ₹{currency(liability.cashSummary.actualAmount)} ·
+                      Short/excess ₹{currency(liability.cashSummary.shortExcessAmount)} · Count {liability.cashSummary.count}.
+                      Complete liability in SCC, then recheck.
+                    </span>
+                  </div>
+                  <div className="form-actions">
+                    <button className="button secondary" type="button" onClick={() => setShowLiabilityModal(false)}>Close</button>
+                    <button
+                      className="button"
+                      type="button"
+                      disabled={checkingLiability}
+                      onClick={() => void openLiabilityGate()}
+                    >
+                      {checkingLiability ? "Checking…" : "Recheck liability"}
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           </section>
         </div>

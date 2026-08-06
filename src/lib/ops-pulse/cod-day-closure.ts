@@ -1,5 +1,5 @@
 import { sendEmail } from "@/lib/email";
-import { fetchRemittance, isCashReconWorkerConfigured } from "@/lib/ops-pulse/cash-recon-worker";
+import { fetchDriverReconciliation, fetchLiabilitySummary, fetchRemittance, isCashReconWorkerConfigured } from "@/lib/ops-pulse/cash-recon-worker";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export type CodGateStatus =
@@ -278,30 +278,51 @@ export async function finalizeCodClosure({
     if (closure.deposit_check_status !== "Passed" && closure.deposit_check_status !== "Exception approved") {
       throw new Error("Validate bank deposit remittance before final COD submission.");
     }
-    const remittance = await fetchRemittance({ stationCode, date: businessDate });
+    const [remittance, driverRecon, liability] = await Promise.all([
+      fetchRemittance({ stationCode, date: businessDate }),
+      fetchDriverReconciliation({ stationCode, date: businessDate }),
+      fetchLiabilitySummary({ stationCode, date: businessDate })
+    ]);
     remittanceExpected = remittance.remittanceTotalCash;
     remittanceCount = remittance.remittanceCodes.length || remittance.submittedCount;
     difference = Number((collectedCod - remittance.remittanceTotalCash).toFixed(2));
     noDepositLiability = remittance.createdCount === 0;
-    if (Math.abs(difference) >= 0.01 && !overrideRemarks) {
+
+    if (difference < -10) {
       throw new Error(
-        `Cash vs remittance difference is ₹${difference.toFixed(2)}. Provide remittance override remarks before final submission.`
+        `Cash is short by more than ₹10 vs remittance (₹${Math.abs(difference).toFixed(2)}). Clear the short before final submission.`
       );
     }
-    if (difference < -10 && !overrideRemarks) {
+    const expectedCashTotal = Number(driverRecon.expectedCash?.totalReceived ?? NaN);
+    if (Number.isFinite(expectedCashTotal)) {
+      const expectedDiff = Number((remittance.remittanceTotalCash - expectedCashTotal).toFixed(2));
+      if (Math.abs(expectedDiff) >= 0.01) {
+        throw new Error(
+          `Remittance ₹${remittance.remittanceTotalCash.toFixed(2)} does not match expectedCash.totalReceived ₹${expectedCashTotal.toFixed(2)}. Clear this before final submission.`
+        );
+      }
+    }
+    if (!liability.isClear) {
+      const cash = liability.cashSummary;
       throw new Error(
-        `Cash is short by more than ₹10 vs remittance (₹${Math.abs(difference).toFixed(2)}). Override remarks are required.`
+        `SCC cash liability is not clear (expected ₹${cash.expectedAmount.toFixed(2)}, actual ₹${cash.actualAmount.toFixed(2)}, short/excess ₹${cash.shortExcessAmount.toFixed(2)}). Complete liability before submitting COD.`
+      );
+    }
+    if (Math.abs(difference) >= 0.01 && !overrideRemarks) {
+      throw new Error(
+        `Cash vs remittance difference is ₹${difference.toFixed(2)}. Provide remittance remarks before final submission.`
       );
     }
     if (remittance.createdCount > 0 && !overrideRemarks) {
       throw new Error(
-        `${remittance.createdCount} remittance(s) are still created/pending in SCC. Clear them or provide override remarks.`
+        `${remittance.createdCount} remittance(s) are still created/pending in SCC. Clear them or provide remarks.`
       );
     }
     remittanceSnapshot = {
       ...remittance,
       difference_amount: difference,
       collected_cash: collectedCod,
+      expected_cash_total: Number.isFinite(expectedCashTotal) ? expectedCashTotal : null,
       override_remarks: overrideRemarks || null,
       validated_at: new Date().toISOString()
     };
