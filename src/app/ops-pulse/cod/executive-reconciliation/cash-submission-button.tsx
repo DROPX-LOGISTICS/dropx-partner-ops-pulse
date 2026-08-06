@@ -147,7 +147,7 @@ export function CashSubmissionButton({
             {checking ? "Checking SCC…" : pending ? "Submitting…" : "Confirm & check SCC"}
           </button>
         </div>
-        {error ? <p className="subtle" style={{ color: "#b42318", marginTop: 8 }}>{error}</p> : null}
+        {error ? <p className="field-error">{error}</p> : null}
       </div>
     );
   }
@@ -168,7 +168,7 @@ export function CashSubmissionButton({
               ? "Submit cash & run SCC"
               : `Submit with ${varianceType}`}
       </button>
-      {error ? <p className="subtle" style={{ color: "#b42318", marginTop: 8 }}>{error}</p> : null}
+      {error ? <p className="field-error">{error}</p> : null}
     </div>
   );
 }

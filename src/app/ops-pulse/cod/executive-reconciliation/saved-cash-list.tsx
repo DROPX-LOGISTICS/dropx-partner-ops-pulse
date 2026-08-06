@@ -306,7 +306,7 @@ export function SavedCashList({
               {row.optimisticSync ? (
                 <p className="subtle" style={{ marginTop: 8 }}>Syncing saved cash to the server...</p>
               ) : null}
-              {rowError ? <p className="subtle" style={{ color: "#b42318", marginTop: 8 }}>{rowError}</p> : null}
+              {rowError ? <p className="field-error">{rowError}</p> : null}
             </form>
           </article>
         );

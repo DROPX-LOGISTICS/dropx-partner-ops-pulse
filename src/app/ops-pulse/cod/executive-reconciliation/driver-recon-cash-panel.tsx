@@ -185,7 +185,7 @@ export function DriverReconCashPanel({
       </div>
 
       {error ? (
-        <p className="subtle" style={{ color: "#b42318", marginTop: 10 }}>{error}</p>
+        <p className="field-error">{error}</p>
       ) : null}
 
       {summary && summary.pendingRows.length ? (

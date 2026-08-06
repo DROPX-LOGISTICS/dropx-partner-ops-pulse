@@ -472,7 +472,7 @@ export function AssociateEntryBuilder({
                 <span className="cash-live-result">{cashState.label} {cashState.amount ? <strong>{cashState.amount}</strong> : null}</span>
               </div>
               {submitError && submittingKey === entry.key ? (
-                <p className="subtle" style={{ color: "#b42318", marginTop: 8 }}>{submitError}</p>
+                <p className="field-error">{submitError}</p>
               ) : null}
             </form>
           </article>

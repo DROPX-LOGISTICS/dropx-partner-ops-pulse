@@ -71,7 +71,7 @@ export function CashSubmissionForm({
         varianceType={varianceType}
         workerConfigured={workerConfigured}
       />
-      {error ? <p className="subtle" style={{ color: "#b42318", marginTop: 8 }}>{error}</p> : null}
+      {error ? <p className="field-error">{error}</p> : null}
       {pending ? <p className="subtle" style={{ marginTop: 8 }}>Submitting cash and opening deposit step…</p> : null}
     </form>
   );
