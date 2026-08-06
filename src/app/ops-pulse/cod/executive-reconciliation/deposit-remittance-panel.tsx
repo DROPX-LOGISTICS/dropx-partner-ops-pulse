@@ -49,6 +49,24 @@ function toneForAmount(value: number) {
   return value > 0 ? "short" : "excess";
 }
 
+function ledgerDayStatus(day: RemittanceLedgerDay): "pending" | "forwarded" | "cleared" {
+  if (day.stillPendingAmount > MATCH_EPSILON) return "pending";
+  if (day.forwardedAmount > MATCH_EPSILON || day.drivers.length > 0) return "forwarded";
+  return "cleared";
+}
+
+function ledgerDayStatusLabel(status: "pending" | "forwarded" | "cleared") {
+  if (status === "pending") return "Pending";
+  if (status === "forwarded") return "Forwarded";
+  return "Cleared";
+}
+
+function ledgerDayStatusTone(status: "pending" | "forwarded" | "cleared") {
+  if (status === "pending") return "danger";
+  if (status === "forwarded") return "warn";
+  return "good";
+}
+
 function RemittanceRowsTable({
   title,
   meta,
@@ -106,6 +124,37 @@ function RemittanceRowsTable({
   );
 }
 
+function LedgerDayCard({
+  day,
+  onOpen
+}: {
+  day: RemittanceLedgerDay;
+  onOpen: (date: string) => void;
+}) {
+  const status = ledgerDayStatus(day);
+  return (
+    <button
+      type="button"
+      className={`remittance-day-card ${status}`}
+      onClick={() => onOpen(day.date)}
+    >
+      <div>
+        <div className="remittance-day-card-title">
+          <strong>{formatDateLabel(day.date)}</strong>
+          <span className={`remittance-status-pill ${ledgerDayStatusTone(status)}`}>{ledgerDayStatusLabel(status)}</span>
+        </div>
+        <span>Expected ₹{currency(day.expectedCashTotal)} · Remittance ₹{currency(day.remittanceTotalCash)}</span>
+      </div>
+      <div className="remittance-day-metrics">
+        <span className={toneForAmount(day.shortAmount)}>Short ₹{currency(day.shortAmount)}</span>
+        <span>Pending ₹{currency(day.stillPendingAmount)}</span>
+        <span>Forwarded ₹{currency(day.forwardedAmount)}</span>
+        <em>View day →</em>
+      </div>
+    </button>
+  );
+}
+
 function LedgerModal({
   stationCode,
   businessDate,
@@ -121,11 +170,10 @@ function LedgerModal({
   const summary = remittance.matchSummary;
   const ledger = remittance.ledger;
   const selectedDay = ledger.find((day) => day.date === selectedDate) ?? null;
-  const pendingDays = ledger.filter((day) =>
-    day.stillPendingAmount > MATCH_EPSILON
-    || day.forwardedAmount > MATCH_EPSILON
-    || day.drivers.length > 0
-  );
+  const openDays = ledger.filter((day) => ledgerDayStatus(day) !== "cleared");
+  const clearedDays = ledger.filter((day) => ledgerDayStatus(day) === "cleared");
+  const overallClear = Boolean(summary && summary.finalPendingTotal <= MATCH_EPSILON && summary.sameDayShortAmount <= MATCH_EPSILON) || (!summary && openDays.length === 0);
+  const selectedDayStatus = selectedDay ? ledgerDayStatus(selectedDay) : null;
 
   return (
     <div className="modal-backdrop" role="presentation">
@@ -136,6 +184,7 @@ function LedgerModal({
             <p className="subtle">
               {stationCode} · business date {businessDate}
               {summary?.windowFrom && summary?.windowTo ? ` · window ${summary.windowFrom} → ${summary.windowTo}` : ""}
+              {!selectedDay ? ` · ${ledger.length} day${ledger.length === 1 ? "" : "s"} in ledger` : ""}
             </p>
           </div>
           <button className="modal-close" type="button" onClick={onClose} aria-label="Close">×</button>
@@ -145,119 +194,159 @@ function LedgerModal({
             <>
               <div className="remittance-ledger-toolbar">
                 <button className="button secondary" type="button" onClick={() => setSelectedDate(null)}>← Back to days</button>
-              </div>
-              <div className="remittance-kpi-grid compact">
-                <div className="remittance-kpi"><span>Expected</span><strong>₹{currency(selectedDay.expectedCashTotal)}</strong></div>
-                <div className="remittance-kpi"><span>Remittance</span><strong>₹{currency(selectedDay.remittanceTotalCash)}</strong></div>
-                <div className={`remittance-kpi ${toneForAmount(selectedDay.shortAmount)}`}>
-                  <span>Short / excess</span><strong>₹{currency(selectedDay.shortAmount)}</strong>
-                </div>
-                <div className="remittance-kpi"><span>Still pending</span><strong>₹{currency(selectedDay.stillPendingAmount)}</strong></div>
-                <div className="remittance-kpi"><span>Carry in</span><strong>₹{currency(selectedDay.carryForwardIn)}</strong></div>
-                <div className="remittance-kpi"><span>Carry out</span><strong>₹{currency(selectedDay.carryForwardOut)}</strong></div>
-                <div className="remittance-kpi"><span>Cleared same day</span><strong>₹{currency(selectedDay.clearedSameDayAmount)}</strong></div>
-                <div className="remittance-kpi"><span>Cleared from prior</span><strong>₹{currency(selectedDay.clearedFromPriorAmount)}</strong></div>
+                {selectedDayStatus ? (
+                  <span className={`remittance-status-pill ${ledgerDayStatusTone(selectedDayStatus)}`}>
+                    {ledgerDayStatusLabel(selectedDayStatus)}
+                  </span>
+                ) : null}
               </div>
 
-              {selectedDay.drivers.length ? selectedDay.drivers.map((driver) => (
-                <div className="remittance-driver-card" key={`${selectedDay.date}-${driver.tasId || driver.driverName}`}>
-                  <div className="remittance-driver-head">
-                    <div>
-                      <strong>{driver.driverName}</strong>
-                      <span>
-                        {driver.tasId ? `TAS ${driver.tasId}` : "No TAS"}
-                        {driver.employeeId ? ` · Emp ${driver.employeeId}` : ""}
-                        {` · ${driver.shipmentCount} shipment${driver.shipmentCount === 1 ? "" : "s"}`}
-                      </span>
-                    </div>
-                    <em>₹{currency(driver.amount)}</em>
+              <div className="remittance-ledger-section">
+                <h4 className="remittance-ledger-section-title">Opening &amp; expected</h4>
+                <div className="remittance-kpi-grid compact">
+                  <div className="remittance-kpi">
+                    <span>Carry-in</span><strong>₹{currency(selectedDay.carryForwardIn)}</strong><small>Opening balance</small>
                   </div>
-                  <div className="table-wrap remittance-table-wrap">
-                    <table>
-                      <thead>
-                        <tr>
-                          <th>Tracking</th>
-                          <th>Shipment</th>
-                          <th>Pending</th>
-                          <th>Kept</th>
-                          <th>Cleared</th>
-                          <th>Days</th>
-                          <th>Status</th>
-                          <th>Remittance</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {driver.shipments.length ? driver.shipments.map((shipment) => (
-                          <tr key={`${shipment.trackingId}-${shipment.remittanceId || ""}-${shipment.pendingAmount}`}>
-                            <td><strong>{shipment.trackingId}</strong></td>
-                            <td>{shipment.shipmentNo || "—"}</td>
-                            <td>₹{currency(shipment.pendingAmount)}</td>
-                            <td>{shipment.keptOnDate || "—"}</td>
-                            <td>{shipment.clearedOnDate || "—"}</td>
-                            <td>{shipment.keptDays ?? "—"}</td>
-                            <td><span className="remittance-chip">{shipment.status}</span></td>
-                            <td>{shipment.remittanceCode || "—"}</td>
-                          </tr>
-                        )) : (
-                          <tr><td className="empty-cell" colSpan={8}>No shipment rows for this driver.</td></tr>
-                        )}
-                      </tbody>
-                    </table>
+                  <div className="remittance-kpi">
+                    <span>Expected</span><strong>₹{currency(selectedDay.expectedCashTotal)}</strong>
+                  </div>
+                  <div className="remittance-kpi">
+                    <span>Remittance</span><strong>₹{currency(selectedDay.remittanceTotalCash)}</strong>
+                  </div>
+                  <div className={`remittance-kpi ${toneForAmount(selectedDay.shortAmount)}`}>
+                    <span>Short / excess</span><strong>₹{currency(selectedDay.shortAmount)}</strong>
                   </div>
                 </div>
-              )) : (
-                <p className="subtle remittance-empty-note">No forward/pending driver detail for this day.</p>
-              )}
+              </div>
+
+              <div className="remittance-ledger-section">
+                <h4 className="remittance-ledger-section-title">Clearance &amp; closing</h4>
+                <div className="remittance-kpi-grid compact">
+                  <div className="remittance-kpi">
+                    <span>Cleared same day</span><strong>₹{currency(selectedDay.clearedSameDayAmount)}</strong>
+                  </div>
+                  <div className="remittance-kpi">
+                    <span>Cleared from prior</span><strong>₹{currency(selectedDay.clearedFromPriorAmount)}</strong>
+                  </div>
+                  <div className={`remittance-kpi ${selectedDay.forwardedAmount > MATCH_EPSILON ? "warn" : ""}`}>
+                    <span>Forwarded</span><strong>₹{currency(selectedDay.forwardedAmount)}</strong>
+                  </div>
+                  <div className={`remittance-kpi ${selectedDay.stillPendingAmount > MATCH_EPSILON ? "short" : ""}`}>
+                    <span>Still pending</span><strong>₹{currency(selectedDay.stillPendingAmount)}</strong>
+                  </div>
+                  <div className="remittance-kpi primary">
+                    <span>Carry-out</span><strong>₹{currency(selectedDay.carryForwardOut)}</strong><small>Closing balance</small>
+                  </div>
+                </div>
+              </div>
+
+              <div className="remittance-ledger-section">
+                <h4 className="remittance-ledger-section-title">
+                  Driver breakdown
+                  {selectedDay.drivers.length ? <span className="remittance-chip">{selectedDay.drivers.length}</span> : null}
+                </h4>
+                {selectedDay.drivers.length ? selectedDay.drivers.map((driver) => (
+                  <div className="remittance-driver-card" key={`${selectedDay.date}-${driver.tasId || driver.driverName}`}>
+                    <div className="remittance-driver-head">
+                      <div>
+                        <strong>{driver.driverName}</strong>
+                        <span>
+                          {driver.tasId ? `TAS ${driver.tasId}` : "No TAS"}
+                          {driver.employeeId ? ` · Emp ${driver.employeeId}` : ""}
+                          {` · ${driver.shipmentCount} shipment${driver.shipmentCount === 1 ? "" : "s"}`}
+                        </span>
+                      </div>
+                      <em>₹{currency(driver.amount)}</em>
+                    </div>
+                    <div className="table-wrap remittance-table-wrap">
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>Tracking</th>
+                            <th>Shipment</th>
+                            <th>Pending</th>
+                            <th>Kept</th>
+                            <th>Cleared</th>
+                            <th>Days</th>
+                            <th>Status</th>
+                            <th>Remittance</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {driver.shipments.length ? driver.shipments.map((shipment) => (
+                            <tr key={`${shipment.trackingId}-${shipment.remittanceId || ""}-${shipment.pendingAmount}`}>
+                              <td><strong>{shipment.trackingId}</strong></td>
+                              <td>{shipment.shipmentNo || "—"}</td>
+                              <td>₹{currency(shipment.pendingAmount)}</td>
+                              <td>{shipment.keptOnDate || "—"}</td>
+                              <td>{shipment.clearedOnDate || "—"}</td>
+                              <td>{shipment.keptDays ?? "—"}</td>
+                              <td>
+                                <span className={`remittance-chip ${/clear/i.test(shipment.status) ? "good" : /pending|forward/i.test(shipment.status) ? "warn" : ""}`}>
+                                  {shipment.status}
+                                </span>
+                              </td>
+                              <td>{shipment.remittanceCode || "—"}</td>
+                            </tr>
+                          )) : (
+                            <tr><td className="empty-cell" colSpan={8}>No shipment rows for this driver.</td></tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )) : (
+                  <p className="subtle remittance-empty-note">No forward/pending driver detail for this day.</p>
+                )}
+              </div>
             </>
           ) : (
             <>
-              {summary ? (
-                <div className="remittance-ledger-summary">
-                  <div>
-                    <span>Match status</span>
-                    <strong className={`remittance-status ${summary.status === "MATCHED" ? "good" : "warn"}`}>{summary.status}</strong>
-                  </div>
-                  <div>
-                    <span>Mode</span>
-                    <strong>{summary.mode}</strong>
-                  </div>
-                  <div>
-                    <span>Final pending</span>
-                    <strong>₹{currency(summary.finalPendingTotal)}</strong>
-                  </div>
-                  <div>
-                    <span>Same-day short</span>
-                    <strong>₹{currency(summary.sameDayShortAmount)}</strong>
-                  </div>
+              <div className={`remittance-ledger-hero ${overallClear ? "good" : "warn"}`}>
+                <div className="remittance-ledger-hero-status">
+                  <strong>{overallClear ? "All cash cleared" : "Pending cash needs attention"}</strong>
+                  <span>
+                    {summary
+                      ? `${summary.mode === "sameDay" ? "Same-day" : summary.mode} match · window ${summary.windowFrom ?? "—"} → ${summary.windowTo ?? "—"}`
+                      : "No match summary returned for this station/date."}
+                  </span>
                 </div>
-              ) : null}
+                {summary ? (
+                  <div className="remittance-ledger-hero-metrics">
+                    <div>
+                      <span>Match status</span>
+                      <strong className={`remittance-status ${summary.status === "MATCHED" ? "good" : "warn"}`}>{summary.status}</strong>
+                    </div>
+                    <div>
+                      <span>Final pending</span>
+                      <strong>₹{currency(summary.finalPendingTotal)}</strong>
+                    </div>
+                    <div>
+                      <span>Same-day short</span>
+                      <strong>₹{currency(summary.sameDayShortAmount)}</strong>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
 
               <div className="remittance-day-list">
-                {(pendingDays.length ? pendingDays : ledger).map((day) => (
-                  <button
-                    key={day.date}
-                    type="button"
-                    className="remittance-day-card"
-                    onClick={() => setSelectedDate(day.date)}
-                  >
-                    <div>
-                      <strong>{formatDateLabel(day.date)}</strong>
-                      <span>
-                        Expected ₹{currency(day.expectedCashTotal)} · Remittance ₹{currency(day.remittanceTotalCash)}
-                      </span>
-                    </div>
-                    <div className="remittance-day-metrics">
-                      <span className={toneForAmount(day.shortAmount)}>Short ₹{currency(day.shortAmount)}</span>
-                      <span>Pending ₹{currency(day.stillPendingAmount)}</span>
-                      <span>Forwarded ₹{currency(day.forwardedAmount)}</span>
-                      <em>View day →</em>
-                    </div>
-                  </button>
-                ))}
-                {!ledger.length ? (
+                {openDays.length ? openDays.map((day) => (
+                  <LedgerDayCard key={day.date} day={day} onOpen={setSelectedDate} />
+                )) : !ledger.length ? (
                   <p className="subtle remittance-empty-note">No ledger rows returned for this station/date.</p>
                 ) : null}
               </div>
+
+              {clearedDays.length ? (
+                <details className="remittance-cleared-days" open={!openDays.length}>
+                  <summary>Cleared days ({clearedDays.length})</summary>
+                  <div className="remittance-day-list">
+                    {clearedDays.map((day) => (
+                      <LedgerDayCard key={day.date} day={day} onOpen={setSelectedDate} />
+                    ))}
+                  </div>
+                </details>
+              ) : null}
             </>
           )}
         </div>

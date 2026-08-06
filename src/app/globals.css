@@ -10602,6 +10602,15 @@ tbody tr:hover td {
   color: #166534;
 }
 
+.remittance-kpi.warn {
+  border-color: #fde68a;
+  background: linear-gradient(180deg, #fffdf5 0%, #fffbeb 100%);
+}
+
+.remittance-kpi.warn strong {
+  color: #b45309;
+}
+
 .remittance-meta-row {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -10722,6 +10731,16 @@ tbody tr:hover td {
   letter-spacing: .02em;
 }
 
+.remittance-chip.good {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.remittance-chip.warn {
+  background: #fef3c7;
+  color: #92400e;
+}
+
 .remittance-empty-state {
   padding: 18px;
   border: 1px dashed #cbd5e1;
@@ -10758,28 +10777,84 @@ tbody tr:hover td {
 
 .remittance-ledger-toolbar {
   display: flex;
-  gap: 8px;
+  align-items: center;
+  gap: 10px;
 }
 
-.remittance-ledger-summary {
+.remittance-ledger-hero {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  border: 1px solid #bbf7d0;
+  border-left: 4px solid #16a34a;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #f0fdf4 0%, #ffffff 100%);
+}
+
+.remittance-ledger-hero.warn {
+  border-color: #fde68a;
+  border-left-color: #d97706;
+  background: linear-gradient(180deg, #fffbeb 0%, #ffffff 100%);
+}
+
+.remittance-ledger-hero-status {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 8px;
+  gap: 3px;
+  min-width: 0;
 }
 
-.remittance-ledger-summary > div {
-  display: grid;
-  gap: 4px;
-  padding: 10px 12px;
-  border-radius: 10px;
-  border: 1px solid #e2e8f0;
-  background: #f8fafc;
+.remittance-ledger-hero-status strong {
+  color: #0f172a;
+  font-size: 15px;
 }
 
-.remittance-ledger-summary span {
+.remittance-ledger-hero-status span {
   color: #64748b;
-  font-size: 10px;
-  font-weight: 750;
+  font-size: 12px;
+}
+
+.remittance-ledger-hero-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+}
+
+.remittance-ledger-hero-metrics > div {
+  display: grid;
+  gap: 2px;
+}
+
+.remittance-ledger-hero-metrics span {
+  color: #64748b;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+
+.remittance-ledger-hero-metrics strong {
+  color: #0f172a;
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+
+.remittance-ledger-section {
+  display: grid;
+  gap: 8px;
+}
+
+.remittance-ledger-section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: #64748b;
+  font-size: 10.5px;
+  font-weight: 850;
+  letter-spacing: .05em;
   text-transform: uppercase;
 }
 
@@ -10789,28 +10864,49 @@ tbody tr:hover td {
 }
 
 .remittance-day-card {
+  position: relative;
   display: flex;
   justify-content: space-between;
   gap: 16px;
   width: 100%;
   text-align: left;
-  padding: 14px 16px;
+  padding: 14px 16px 14px 18px;
   border: 1px solid #e2e8f0;
+  border-left: 3px solid #cbd5e1;
   border-radius: 12px;
   background: #fff;
   cursor: pointer;
-  transition: border-color .15s ease, box-shadow .15s ease;
+  transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease;
 }
 
 .remittance-day-card:hover {
   border-color: #94a3b8;
   box-shadow: 0 8px 20px rgba(15, 23, 42, .06);
+  transform: translateY(-1px);
+}
+
+.remittance-day-card.pending {
+  border-left-color: #dc2626;
+}
+
+.remittance-day-card.forwarded {
+  border-left-color: #d97706;
+}
+
+.remittance-day-card.cleared {
+  border-left-color: #16a34a;
 }
 
 .remittance-day-card > div:first-child {
   display: grid;
-  gap: 4px;
+  gap: 5px;
   min-width: 0;
+}
+
+.remittance-day-card-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .remittance-day-card strong {
@@ -10838,11 +10934,51 @@ tbody tr:hover td {
   font-weight: 750;
 }
 
+.remittance-cleared-days {
+  border: 1px solid #e5e9f0;
+  border-radius: 12px;
+  padding: 4px;
+  background: #f8fafc;
+}
+
+.remittance-cleared-days > summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 9px 12px;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.remittance-cleared-days > summary::-webkit-details-marker {
+  display: none;
+}
+
+.remittance-cleared-days > summary::before {
+  content: "▸";
+  display: inline-block;
+  margin-right: 6px;
+  color: #94a3b8;
+  transition: transform .15s ease;
+}
+
+.remittance-cleared-days[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.remittance-cleared-days > .remittance-day-list {
+  padding: 0 6px 6px;
+}
+
 .remittance-driver-card {
   border: 1px solid #e2e8f0;
   border-radius: 12px;
   overflow: hidden;
   background: #fff;
+}
+
+.remittance-driver-card + .remittance-driver-card {
+  margin-top: 10px;
 }
 
 .remittance-driver-head {
@@ -10879,8 +11015,7 @@ tbody tr:hover td {
 @media (max-width: 1100px) {
   .remittance-kpi-grid,
   .remittance-kpi-grid.compact,
-  .remittance-meta-row,
-  .remittance-ledger-summary {
+  .remittance-meta-row {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -10888,8 +11023,7 @@ tbody tr:hover td {
 @media (max-width: 720px) {
   .remittance-kpi-grid,
   .remittance-kpi-grid.compact,
-  .remittance-meta-row,
-  .remittance-ledger-summary {
+  .remittance-meta-row {
     grid-template-columns: 1fr;
   }
 
@@ -10899,6 +11033,15 @@ tbody tr:hover td {
 
   .remittance-day-metrics {
     justify-items: start;
+  }
+
+  .remittance-ledger-hero {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .remittance-ledger-hero-metrics {
+    gap: 14px;
   }
 }
 
