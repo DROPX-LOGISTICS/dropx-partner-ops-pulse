@@ -225,6 +225,7 @@ type RawRemittanceSummary = {
   stationCode?: string;
   date?: string;
   sessionSource?: string | null;
+  accountKey?: string | null;
   remittanceTotalCash?: number | { value?: number } | null;
   created?: RawRemittanceRow[];
   createdCount?: number;
@@ -237,6 +238,46 @@ type RawRemittanceSummary = {
     startTime?: number | null;
     endTime?: number | null;
   } | null;
+  summary?: {
+    status?: string | null;
+    mode?: string | null;
+    window?: { from?: string | null; to?: string | null } | null;
+    sameDayExpectedCashTotal?: number | { value?: number } | null;
+    sameDayRemittanceTotalCash?: number | { value?: number } | null;
+    sameDayShortAmount?: number | { value?: number } | null;
+    finalPendingTotal?: number | { value?: number } | null;
+    limitedByRemittanceWindow?: boolean | null;
+  } | null;
+  ledger?: Array<{
+    date?: string | null;
+    expectedCashTotal?: number | { value?: number } | null;
+    remittanceTotalCash?: number | { value?: number } | null;
+    shortAmount?: number | { value?: number } | null;
+    carryForwardIn?: number | { value?: number } | null;
+    carryForwardOut?: number | { value?: number } | null;
+    clearedSameDayAmount?: number | { value?: number } | null;
+    forwardedAmount?: number | { value?: number } | null;
+    stillPendingAmount?: number | { value?: number } | null;
+    clearedFromPriorAmount?: number | { value?: number } | null;
+    drivers?: Array<{
+      driverName?: string | null;
+      tasId?: string | null;
+      employeeId?: string | number | null;
+      amount?: number | { value?: number } | null;
+      shipmentCount?: number | null;
+      shipments?: Array<{
+        trackingId?: string | null;
+        shipmentNo?: string | null;
+        pendingAmount?: number | { value?: number } | null;
+        keptOnDate?: string | null;
+        clearedOnDate?: string | null;
+        keptDays?: number | null;
+        status?: string | null;
+        remittanceId?: string | null;
+        remittanceCode?: string | null;
+      }> | null;
+    }> | null;
+  }> | null;
 };
 
 function mapRemittanceRow(row: RawRemittanceRow): RemittanceRowNormalized {
@@ -267,6 +308,44 @@ function mapRemittanceRow(row: RawRemittanceRow): RemittanceRowNormalized {
   };
 }
 
+function mapRemittanceLedger(raw: RawRemittanceSummary["ledger"]): RemittanceSummaryNormalized["ledger"] {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((day) => ({
+    date: String(day?.date ?? "").trim(),
+    expectedCashTotal: moneyValue(day?.expectedCashTotal),
+    remittanceTotalCash: moneyValue(day?.remittanceTotalCash),
+    shortAmount: moneyValue(day?.shortAmount),
+    carryForwardIn: moneyValue(day?.carryForwardIn),
+    carryForwardOut: moneyValue(day?.carryForwardOut),
+    clearedSameDayAmount: moneyValue(day?.clearedSameDayAmount),
+    forwardedAmount: moneyValue(day?.forwardedAmount),
+    stillPendingAmount: moneyValue(day?.stillPendingAmount),
+    clearedFromPriorAmount: moneyValue(day?.clearedFromPriorAmount),
+    drivers: Array.isArray(day?.drivers)
+      ? day.drivers.map((driver) => ({
+          driverName: String(driver?.driverName ?? "").trim() || "Unknown driver",
+          tasId: driver?.tasId == null ? null : String(driver.tasId),
+          employeeId: driver?.employeeId == null || driver.employeeId === "" ? null : String(driver.employeeId),
+          amount: moneyValue(driver?.amount),
+          shipmentCount: Number(driver?.shipmentCount ?? 0) || 0,
+          shipments: Array.isArray(driver?.shipments)
+            ? driver.shipments.map((shipment) => ({
+                trackingId: String(shipment?.trackingId ?? "").trim() || "-",
+                shipmentNo: String(shipment?.shipmentNo ?? "").trim(),
+                pendingAmount: moneyValue(shipment?.pendingAmount),
+                keptOnDate: shipment?.keptOnDate == null ? null : String(shipment.keptOnDate),
+                clearedOnDate: shipment?.clearedOnDate == null ? null : String(shipment.clearedOnDate),
+                keptDays: typeof shipment?.keptDays === "number" ? shipment.keptDays : null,
+                status: String(shipment?.status ?? "").trim() || "-",
+                remittanceId: shipment?.remittanceId == null ? null : String(shipment.remittanceId),
+                remittanceCode: shipment?.remittanceCode == null ? null : String(shipment.remittanceCode)
+              }))
+            : []
+        }))
+      : []
+  }));
+}
+
 export async function fetchRemittance(params: {
   stationCode: string;
   date: string;
@@ -274,11 +353,25 @@ export async function fetchRemittance(params: {
   const raw = await postWorker<RawRemittanceSummary>("/api/admin/executive/remittance", params);
   const created = Array.isArray(raw.created) ? raw.created.map(mapRemittanceRow) : [];
   const submitted = Array.isArray(raw.submitted) ? raw.submitted.map(mapRemittanceRow) : [];
+  const matchSummary = raw.summary && typeof raw.summary === "object"
+    ? {
+        status: String(raw.summary.status ?? "").trim().toUpperCase() || "UNKNOWN",
+        mode: String(raw.summary.mode ?? "").trim() || "sameDay",
+        windowFrom: raw.summary.window?.from == null ? null : String(raw.summary.window.from),
+        windowTo: raw.summary.window?.to == null ? null : String(raw.summary.window.to),
+        sameDayExpectedCashTotal: moneyValue(raw.summary.sameDayExpectedCashTotal),
+        sameDayRemittanceTotalCash: moneyValue(raw.summary.sameDayRemittanceTotalCash),
+        sameDayShortAmount: moneyValue(raw.summary.sameDayShortAmount),
+        finalPendingTotal: moneyValue(raw.summary.finalPendingTotal),
+        limitedByRemittanceWindow: Boolean(raw.summary.limitedByRemittanceWindow)
+      }
+    : null;
   return {
     status: String(raw.status ?? "ok"),
     stationCode: String(raw.stationCode ?? params.stationCode).toUpperCase(),
     date: String(raw.date ?? params.date),
     sessionSource: raw.sessionSource == null ? null : String(raw.sessionSource),
+    accountKey: raw.accountKey == null ? null : String(raw.accountKey),
     remittanceTotalCash: moneyValue(raw.remittanceTotalCash),
     created,
     createdCount: Number(raw.createdCount ?? created.length) || created.length,
@@ -292,6 +385,8 @@ export async function fetchRemittance(params: {
     dateRange: {
       startTime: typeof raw.dateRange?.startTime === "number" ? raw.dateRange.startTime : null,
       endTime: typeof raw.dateRange?.endTime === "number" ? raw.dateRange.endTime : null
-    }
+    },
+    matchSummary,
+    ledger: mapRemittanceLedger(raw.ledger)
   };
 }

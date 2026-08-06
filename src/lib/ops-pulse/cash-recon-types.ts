@@ -154,11 +154,59 @@ export type RemittanceRowNormalized = {
   stationVarianceList: RemittanceStationVarianceItem[];
 };
 
+export type RemittanceLedgerShipment = {
+  trackingId: string;
+  shipmentNo: string;
+  pendingAmount: number;
+  keptOnDate: string | null;
+  clearedOnDate: string | null;
+  keptDays: number | null;
+  status: string;
+  remittanceId: string | null;
+  remittanceCode: string | null;
+};
+
+export type RemittanceLedgerDriver = {
+  driverName: string;
+  tasId: string | null;
+  employeeId: string | null;
+  amount: number;
+  shipmentCount: number;
+  shipments: RemittanceLedgerShipment[];
+};
+
+export type RemittanceLedgerDay = {
+  date: string;
+  expectedCashTotal: number;
+  remittanceTotalCash: number;
+  shortAmount: number;
+  carryForwardIn: number;
+  carryForwardOut: number;
+  clearedSameDayAmount: number;
+  forwardedAmount: number;
+  stillPendingAmount: number;
+  clearedFromPriorAmount: number;
+  drivers: RemittanceLedgerDriver[];
+};
+
+export type RemittanceMatchSummary = {
+  status: string;
+  mode: string;
+  windowFrom: string | null;
+  windowTo: string | null;
+  sameDayExpectedCashTotal: number;
+  sameDayRemittanceTotalCash: number;
+  sameDayShortAmount: number;
+  finalPendingTotal: number;
+  limitedByRemittanceWindow: boolean;
+};
+
 export type RemittanceSummaryNormalized = {
   status: string;
   stationCode: string;
   date: string;
   sessionSource: string | null;
+  accountKey: string | null;
   remittanceTotalCash: number;
   created: RemittanceRowNormalized[];
   createdCount: number;
@@ -171,6 +219,8 @@ export type RemittanceSummaryNormalized = {
     startTime: number | null;
     endTime: number | null;
   };
+  matchSummary: RemittanceMatchSummary | null;
+  ledger: RemittanceLedgerDay[];
 };
 
 export function moneyValue(value: CashMoney | number | string | null | undefined): number {

@@ -4,10 +4,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type {
   LiabilitySummaryNormalized,
+  RemittanceLedgerDay,
   RemittanceRowNormalized,
   RemittanceSummaryNormalized
 } from "@/lib/ops-pulse/cash-recon-types";
-import { readLatestDriverReconCache } from "@/lib/ops-pulse/driver-recon-client-cache";
 import { submitCodDayClosure, validateCodRemittanceDeposit } from "./actions";
 
 const SHORT_BLOCK_RUPEES = 10;
@@ -18,12 +18,8 @@ function currency(value: number) {
   return value.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-function nearlyEqual(a: number, b: number, epsilon = MATCH_EPSILON) {
-  return Math.abs(a - b) < epsilon;
-}
-
 function formatEpoch(ms: number | null) {
-  if (ms == null || !Number.isFinite(ms)) return "-";
+  if (ms == null || !Number.isFinite(ms)) return "—";
   return new Date(ms).toLocaleString("en-IN", {
     timeZone: "Asia/Kolkata",
     day: "2-digit",
@@ -31,36 +27,53 @@ function formatEpoch(ms: number | null) {
     year: "numeric",
     hour: "2-digit",
     minute: "2-digit",
-    second: "2-digit",
     hour12: true
   });
 }
 
-function RemittanceTable({
+function formatDateLabel(date: string) {
+  if (!date) return "—";
+  const parsed = new Date(`${date}T12:00:00`);
+  if (Number.isNaN(parsed.getTime())) return date;
+  return parsed.toLocaleDateString("en-IN", {
+    timeZone: "Asia/Kolkata",
+    weekday: "short",
+    day: "2-digit",
+    month: "short",
+    year: "numeric"
+  });
+}
+
+function toneForAmount(value: number) {
+  if (Math.abs(value) < MATCH_EPSILON) return "neutral";
+  return value > 0 ? "short" : "excess";
+}
+
+function RemittanceRowsTable({
   title,
-  badge,
+  meta,
   rows,
   emptyLabel
 }: {
   title: string;
-  badge: string;
+  meta: string;
   rows: RemittanceRowNormalized[];
   emptyLabel: string;
 }) {
   return (
-    <div style={{ marginTop: 16 }}>
-      <div className="reconciliation-gate-head" style={{ marginBottom: 8 }}>
+    <div className="remittance-table-block">
+      <div className="remittance-table-head">
         <div>
           <strong>{title}</strong>
-          <span className="subtle" style={{ marginLeft: 8 }}>{badge}</span>
+          <span>{meta}</span>
         </div>
-        <span className="count-badge">{rows.length}</span>
+        <em>{rows.length}</em>
       </div>
-      <div className="table-wrap">
+      <div className="table-wrap remittance-table-wrap">
         <table>
           <thead>
             <tr>
-              <th>Remittance code</th>
+              <th>Code</th>
               <th>Status</th>
               <th>Created</th>
               <th>Submitted</th>
@@ -73,15 +86,15 @@ function RemittanceTable({
             {rows.length ? rows.map((row) => (
               <tr key={`${row.remittanceId || row.remittanceCode}-${row.creationDate ?? 0}-${row.status}`}>
                 <td>
-                  <strong>{row.remittanceCode || "-"}</strong>
-                  {row.remittanceId ? <><br /><span className="subtle">{row.remittanceId}</span></> : null}
+                  <strong>{row.remittanceCode || "—"}</strong>
+                  {row.remittanceId ? <small className="remittance-id">{row.remittanceId}</small> : null}
                 </td>
-                <td>{row.status}</td>
+                <td><span className="remittance-chip">{row.status}</span></td>
                 <td>{formatEpoch(row.creationDate)}</td>
                 <td>{formatEpoch(row.submissionDate)}</td>
                 <td>₹{currency(row.expectedAmount)}</td>
                 <td>₹{currency(row.actualAmount)}</td>
-                <td>₹{currency(row.variance)}</td>
+                <td className={`amount-tone ${toneForAmount(row.variance)}`}>₹{currency(row.variance)}</td>
               </tr>
             )) : (
               <tr><td className="empty-cell" colSpan={7}>{emptyLabel}</td></tr>
@@ -89,6 +102,166 @@ function RemittanceTable({
           </tbody>
         </table>
       </div>
+    </div>
+  );
+}
+
+function LedgerModal({
+  stationCode,
+  businessDate,
+  remittance,
+  onClose
+}: {
+  stationCode: string;
+  businessDate: string;
+  remittance: RemittanceSummaryNormalized;
+  onClose: () => void;
+}) {
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const summary = remittance.matchSummary;
+  const ledger = remittance.ledger;
+  const selectedDay = ledger.find((day) => day.date === selectedDate) ?? null;
+  const pendingDays = ledger.filter((day) =>
+    day.stillPendingAmount > MATCH_EPSILON
+    || day.forwardedAmount > MATCH_EPSILON
+    || day.drivers.length > 0
+  );
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <section className="modal-panel remittance-ledger-modal" role="dialog" aria-modal="true" aria-labelledby="ledger-title">
+        <div className="panel-head">
+          <div>
+            <h2 id="ledger-title">{selectedDay ? `Ledger · ${formatDateLabel(selectedDay.date)}` : "Pending cash ledger"}</h2>
+            <p className="subtle">
+              {stationCode} · business date {businessDate}
+              {summary?.windowFrom && summary?.windowTo ? ` · window ${summary.windowFrom} → ${summary.windowTo}` : ""}
+            </p>
+          </div>
+          <button className="modal-close" type="button" onClick={onClose} aria-label="Close">×</button>
+        </div>
+        <div className="panel-body remittance-ledger-body">
+          {selectedDay ? (
+            <>
+              <div className="remittance-ledger-toolbar">
+                <button className="button secondary" type="button" onClick={() => setSelectedDate(null)}>← Back to days</button>
+              </div>
+              <div className="remittance-kpi-grid compact">
+                <div className="remittance-kpi"><span>Expected</span><strong>₹{currency(selectedDay.expectedCashTotal)}</strong></div>
+                <div className="remittance-kpi"><span>Remittance</span><strong>₹{currency(selectedDay.remittanceTotalCash)}</strong></div>
+                <div className={`remittance-kpi ${toneForAmount(selectedDay.shortAmount)}`}>
+                  <span>Short / excess</span><strong>₹{currency(selectedDay.shortAmount)}</strong>
+                </div>
+                <div className="remittance-kpi"><span>Still pending</span><strong>₹{currency(selectedDay.stillPendingAmount)}</strong></div>
+                <div className="remittance-kpi"><span>Carry in</span><strong>₹{currency(selectedDay.carryForwardIn)}</strong></div>
+                <div className="remittance-kpi"><span>Carry out</span><strong>₹{currency(selectedDay.carryForwardOut)}</strong></div>
+                <div className="remittance-kpi"><span>Cleared same day</span><strong>₹{currency(selectedDay.clearedSameDayAmount)}</strong></div>
+                <div className="remittance-kpi"><span>Cleared from prior</span><strong>₹{currency(selectedDay.clearedFromPriorAmount)}</strong></div>
+              </div>
+
+              {selectedDay.drivers.length ? selectedDay.drivers.map((driver) => (
+                <div className="remittance-driver-card" key={`${selectedDay.date}-${driver.tasId || driver.driverName}`}>
+                  <div className="remittance-driver-head">
+                    <div>
+                      <strong>{driver.driverName}</strong>
+                      <span>
+                        {driver.tasId ? `TAS ${driver.tasId}` : "No TAS"}
+                        {driver.employeeId ? ` · Emp ${driver.employeeId}` : ""}
+                        {` · ${driver.shipmentCount} shipment${driver.shipmentCount === 1 ? "" : "s"}`}
+                      </span>
+                    </div>
+                    <em>₹{currency(driver.amount)}</em>
+                  </div>
+                  <div className="table-wrap remittance-table-wrap">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Tracking</th>
+                          <th>Shipment</th>
+                          <th>Pending</th>
+                          <th>Kept</th>
+                          <th>Cleared</th>
+                          <th>Days</th>
+                          <th>Status</th>
+                          <th>Remittance</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {driver.shipments.length ? driver.shipments.map((shipment) => (
+                          <tr key={`${shipment.trackingId}-${shipment.remittanceId || ""}-${shipment.pendingAmount}`}>
+                            <td><strong>{shipment.trackingId}</strong></td>
+                            <td>{shipment.shipmentNo || "—"}</td>
+                            <td>₹{currency(shipment.pendingAmount)}</td>
+                            <td>{shipment.keptOnDate || "—"}</td>
+                            <td>{shipment.clearedOnDate || "—"}</td>
+                            <td>{shipment.keptDays ?? "—"}</td>
+                            <td><span className="remittance-chip">{shipment.status}</span></td>
+                            <td>{shipment.remittanceCode || "—"}</td>
+                          </tr>
+                        )) : (
+                          <tr><td className="empty-cell" colSpan={8}>No shipment rows for this driver.</td></tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )) : (
+                <p className="subtle remittance-empty-note">No forward/pending driver detail for this day.</p>
+              )}
+            </>
+          ) : (
+            <>
+              {summary ? (
+                <div className="remittance-ledger-summary">
+                  <div>
+                    <span>Match status</span>
+                    <strong className={`remittance-status ${summary.status === "MATCHED" ? "good" : "warn"}`}>{summary.status}</strong>
+                  </div>
+                  <div>
+                    <span>Mode</span>
+                    <strong>{summary.mode}</strong>
+                  </div>
+                  <div>
+                    <span>Final pending</span>
+                    <strong>₹{currency(summary.finalPendingTotal)}</strong>
+                  </div>
+                  <div>
+                    <span>Same-day short</span>
+                    <strong>₹{currency(summary.sameDayShortAmount)}</strong>
+                  </div>
+                </div>
+              ) : null}
+
+              <div className="remittance-day-list">
+                {(pendingDays.length ? pendingDays : ledger).map((day) => (
+                  <button
+                    key={day.date}
+                    type="button"
+                    className="remittance-day-card"
+                    onClick={() => setSelectedDate(day.date)}
+                  >
+                    <div>
+                      <strong>{formatDateLabel(day.date)}</strong>
+                      <span>
+                        Expected ₹{currency(day.expectedCashTotal)} · Remittance ₹{currency(day.remittanceTotalCash)}
+                      </span>
+                    </div>
+                    <div className="remittance-day-metrics">
+                      <span className={toneForAmount(day.shortAmount)}>Short ₹{currency(day.shortAmount)}</span>
+                      <span>Pending ₹{currency(day.stillPendingAmount)}</span>
+                      <span>Forwarded ₹{currency(day.forwardedAmount)}</span>
+                      <em>View day →</em>
+                    </div>
+                  </button>
+                ))}
+                {!ledger.length ? (
+                  <p className="subtle remittance-empty-note">No ledger rows returned for this station/date.</p>
+                ) : null}
+              </div>
+            </>
+          )}
+        </div>
+      </section>
     </div>
   );
 }
@@ -125,10 +298,10 @@ export function DepositRemittancePanel({
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [remittance, setRemittance] = useState<RemittanceSummaryNormalized | null>(null);
-  const [expectedCashTotal, setExpectedCashTotal] = useState<number | null>(null);
   const [validateRemarks, setValidateRemarks] = useState(initialOverrideRemarks);
   const [showDifferenceModal, setShowDifferenceModal] = useState(false);
   const [showLiabilityModal, setShowLiabilityModal] = useState(false);
+  const [showLedgerModal, setShowLedgerModal] = useState(false);
   const [liability, setLiability] = useState<LiabilitySummaryNormalized | null>(null);
   const [depositValidated, setDepositValidated] = useState(depositAlreadyCleared);
   const [cooldownUntil, setCooldownUntil] = useState(0);
@@ -153,23 +326,37 @@ export function DepositRemittancePanel({
     return () => window.clearInterval(id);
   }, [cooldownUntil]);
 
-  const difference = useMemo(() => {
-    if (!remittance) return null;
-    return Number((collectedCash - remittance.remittanceTotalCash).toFixed(2));
-  }, [collectedCash, remittance]);
+  const match = remittance?.matchSummary ?? null;
+  const expectedCashTotal = match?.sameDayExpectedCashTotal ?? null;
+  const remittanceCash = remittance?.remittanceTotalCash ?? null;
 
-  const expectedVsRemittanceDiff = useMemo(() => {
-    if (!remittance || expectedCashTotal == null) return null;
-    return Number((remittance.remittanceTotalCash - expectedCashTotal).toFixed(2));
-  }, [expectedCashTotal, remittance]);
+  const pageVsRemittance = useMemo(() => {
+    if (remittanceCash == null) return null;
+    return Number((collectedCash - remittanceCash).toFixed(2));
+  }, [collectedCash, remittanceCash]);
 
-  const needsDifferenceRemarks = difference != null && Math.abs(difference) >= MATCH_EPSILON;
-  const isShortOverLimit = difference != null && difference < -SHORT_BLOCK_RUPEES;
+  const sameDayShort = match?.sameDayShortAmount ?? null;
+  const isShortOverLimit = pageVsRemittance != null && pageVsRemittance < -SHORT_BLOCK_RUPEES;
+  const unresolvedPending = Boolean(match && match.finalPendingTotal > MATCH_EPSILON);
+  const sameDayShortBlocked = Boolean(
+    match
+    && match.mode === "sameDay"
+    && match.sameDayShortAmount > SHORT_BLOCK_RUPEES
+  );
   const expectedCashMismatch = Boolean(
     remittance
-    && (expectedCashTotal == null
-      || (expectedVsRemittanceDiff != null && Math.abs(expectedVsRemittanceDiff) >= MATCH_EPSILON))
+    && (
+      unresolvedPending
+      || sameDayShortBlocked
+      || (
+        !match
+        && expectedCashTotal != null
+        && remittanceCash != null
+        && Math.abs(remittanceCash - expectedCashTotal) >= MATCH_EPSILON
+      )
+    )
   );
+  const needsDifferenceRemarks = pageVsRemittance != null && Math.abs(pageVsRemittance) >= MATCH_EPSILON;
   const hasPendingCreated = Boolean(remittance && remittance.createdCount > 0);
   const submitBlocked = isShortOverLimit || expectedCashMismatch;
   const validateBusy = checking || savingValidation;
@@ -186,22 +373,6 @@ export function DepositRemittancePanel({
 
   function startCooldown() {
     setCooldownUntil(Date.now() + VALIDATE_COOLDOWN_MS);
-  }
-
-  async function loadExpectedCashTotal(): Promise<number | null> {
-    const cached = readLatestDriverReconCache({ stationCode, businessDate, locationId });
-    const cachedTotal = Number(cached?.expectedCash?.totalReceived);
-    if (Number.isFinite(cachedTotal)) return Number(cachedTotal.toFixed(2));
-
-    const response = await fetch("/api/ops-pulse/cod/cash-recon/driver-reconciliation", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ stationCode, date: businessDate, locationId })
-    });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(payload?.error || "Unable to load expected cash.");
-    const total = Number(payload?.expectedCash?.totalReceived);
-    return Number.isFinite(total) ? Number(total.toFixed(2)) : null;
   }
 
   async function persistValidation(summary: RemittanceSummaryNormalized, overrideRemarks: string) {
@@ -250,28 +421,28 @@ export function DepositRemittancePanel({
     setShowLiabilityModal(false);
     setChecking(true);
     try {
-      const [remittanceResponse, expectedTotal] = await Promise.all([
-        fetch("/api/ops-pulse/cod/cash-recon/remittance", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ stationCode, date: businessDate })
-        }),
-        loadExpectedCashTotal()
-      ]);
-      const payload = await remittanceResponse.json().catch(() => ({}));
-      if (!remittanceResponse.ok) throw new Error(payload?.error || "Unable to load remittance.");
+      const response = await fetch("/api/ops-pulse/cod/cash-recon/remittance", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ stationCode, date: businessDate })
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload?.error || "Unable to load remittance.");
       const summary = payload as RemittanceSummaryNormalized;
       setRemittance(summary);
-      setExpectedCashTotal(expectedTotal);
 
       const diff = Number((collectedCash - summary.remittanceTotalCash).toFixed(2));
       const shortBlocked = diff < -SHORT_BLOCK_RUPEES;
-      const expectedMismatch = expectedTotal != null
-        && !nearlyEqual(summary.remittanceTotalCash, expectedTotal);
+      const matchSummary = summary.matchSummary;
+      const pendingBlocked = Boolean(matchSummary && matchSummary.finalPendingTotal > MATCH_EPSILON);
+      const sameDayBlocked = Boolean(
+        matchSummary
+        && matchSummary.mode === "sameDay"
+        && matchSummary.sameDayShortAmount > SHORT_BLOCK_RUPEES
+      );
       const needsRemarks = (Math.abs(diff) >= MATCH_EPSILON || summary.createdCount > 0) && !shortBlocked;
 
-      if (shortBlocked || expectedMismatch) {
-        // Still persist so tables/status are saved, but submit stays disabled until cleared.
+      if (shortBlocked || pendingBlocked || sameDayBlocked) {
         await persistValidation(summary, validateRemarks.trim());
       } else if (needsRemarks) {
         setDepositValidated(false);
@@ -326,7 +497,7 @@ export function DepositRemittancePanel({
         !depositValidated
           ? "Validate deposit before submitting final COD closure."
           : submitBlocked
-            ? "Clear short cash / remittance vs expected cash mismatch before submitting."
+            ? "Clear short cash / pending remittance ledger before submitting."
             : null
       );
       return;
@@ -364,166 +535,210 @@ export function DepositRemittancePanel({
             ? "Validate again"
             : "Validate deposit";
 
+  const matchStatus = match?.status ?? null;
+  const pendingDayCount = remittance?.ledger.filter((day: RemittanceLedgerDay) =>
+    day.stillPendingAmount > MATCH_EPSILON || day.forwardedAmount > MATCH_EPSILON || day.drivers.length > 0
+  ).length ?? 0;
+
   return (
     <>
-      <section className={`reconciliation-gate ${!driverCleared ? "locked" : ""}`}>
+      <section className={`reconciliation-gate remittance-deposit-panel ${!driverCleared ? "locked" : ""}`}>
         <div className="reconciliation-gate-head">
-          <div><span>Validation 2</span><strong>Bank deposit</strong></div>
-          <span className="count-badge">{depositValidated ? "Validated" : remittance ? "Reviewed" : "Not validated"}</span>
+          <div>
+            <span>Validation 2</span>
+            <strong>Bank deposit</strong>
+          </div>
+          <span className={`remittance-status-pill ${depositValidated ? "good" : remittance ? "warn" : ""}`}>
+            {depositValidated ? "Validated" : remittance ? "Reviewed" : "Not validated"}
+          </span>
         </div>
-        <p className="subtle">
-          Validate against SCC remittance for {stationCode} · {businessDate}. Collected cash on this page: ₹{currency(collectedCash)}.
-          You can validate again after updates; locked only after final submit.
-        </p>
-        <form ref={validateFormRef} className="form-actions" style={{ marginTop: 12 }} onSubmit={(event) => event.preventDefault()}>
-          <input type="hidden" name="return_href" value={returnHref} />
-          <input type="hidden" name="business_date" value={businessDate} />
-          <input type="hidden" name="location_id" value={locationId} />
-          <input type="hidden" name="response_mode" value="client" />
-          <button
-            className="button secondary"
-            type="button"
-            disabled={!canValidate}
-            onClick={() => void validateDeposit()}
-          >
-            {validateLabel}
-          </button>
-        </form>
-        {validateOnCooldown && !checking ? (
-          <p className="subtle" style={{ marginTop: 8 }}>
-            Next validate available in {cooldownLeftSec}s (avoids double requests).
+
+        <div className="remittance-intro">
+          <p>
+            SCC remittance for <strong>{stationCode}</strong> · <strong>{businessDate}</strong>.
+            Page cash <strong>₹{currency(collectedCash)}</strong>. Re-validate after SCC updates; locked only after final submit.
           </p>
-        ) : null}
+          <div className="remittance-actions">
+            <form ref={validateFormRef} onSubmit={(event) => event.preventDefault()}>
+              <input type="hidden" name="return_href" value={returnHref} />
+              <input type="hidden" name="business_date" value={businessDate} />
+              <input type="hidden" name="location_id" value={locationId} />
+              <input type="hidden" name="response_mode" value="client" />
+              <button
+                className="button secondary"
+                type="button"
+                disabled={!canValidate}
+                onClick={() => void validateDeposit()}
+              >
+                {validateLabel}
+              </button>
+            </form>
+            <button
+              className="button secondary"
+              type="button"
+              disabled={!remittance}
+              onClick={() => setShowLedgerModal(true)}
+            >
+              View pending cash ledger{pendingDayCount ? ` (${pendingDayCount})` : ""}
+            </button>
+          </div>
+          {validateOnCooldown && !checking ? (
+            <p className="subtle remittance-cooldown">Next validate in {cooldownLeftSec}s</p>
+          ) : null}
+        </div>
 
         {error ? (
-          <div className="alert danger" style={{ marginTop: 12 }}>
+          <div className="alert danger remittance-alert">
             <strong>Deposit / submit</strong>
             <span>{error}</span>
           </div>
         ) : null}
         {notice ? (
-          <div className="alert" style={{ marginTop: 12 }}>
+          <div className="alert remittance-alert">
             <strong>Status</strong>
             <span>{notice}</span>
           </div>
         ) : null}
-        {submitting ? (
-          <p className="subtle" style={{ marginTop: 8 }}>Submitting final COD closure…</p>
-        ) : null}
+        {submitting ? <p className="subtle">Submitting final COD closure…</p> : null}
 
         {remittance ? (
           <>
-            <div className="reconciliation-final-summary" style={{ marginTop: 14 }}>
-              <div>
-                <span>Remittance total cash</span>
+            <div className="remittance-kpi-grid">
+              <div className="remittance-kpi primary">
+                <span>Remittance total</span>
                 <strong>₹{currency(remittance.remittanceTotalCash)}</strong>
                 <small>{remittance.submittedCount} submitted · {remittance.createdCount} created</small>
               </div>
-              <div>
-                <span>Expected cash (SCC)</span>
+              <div className="remittance-kpi">
+                <span>Same-day expected</span>
                 <strong>{expectedCashTotal == null ? "—" : `₹${currency(expectedCashTotal)}`}</strong>
-                <small>expectedCash.totalReceived</small>
+                <small>{match?.mode || "expected from remittance summary"}</small>
               </div>
-              <div>
-                <span>Cash submitted (page)</span>
+              <div className="remittance-kpi">
+                <span>Page cash</span>
                 <strong>₹{currency(collectedCash)}</strong>
                 <small>Saved collected COD</small>
               </div>
-              <div>
+              <div className={`remittance-kpi ${pageVsRemittance != null ? toneForAmount(-(pageVsRemittance)) : ""}`}>
                 <span>Page − remittance</span>
-                <strong style={{ color: difference != null && Math.abs(difference) >= MATCH_EPSILON ? "var(--danger, #b42318)" : undefined }}>
-                  ₹{currency(difference ?? 0)}
-                </strong>
+                <strong>₹{currency(pageVsRemittance ?? 0)}</strong>
                 <small>Short &gt; ₹{SHORT_BLOCK_RUPEES} blocks submit</small>
               </div>
             </div>
 
-            {hasPendingCreated ? (
-              <div className="alert" style={{ marginTop: 12 }}>
-                <strong>Remittance pending</strong>
-                <span>{remittance.createdCount} created remittance(s) totaling ₹{currency(remittance.createdTotal)} are not yet submitted in SCC.</span>
+            <div className="remittance-meta-row">
+              <div className="remittance-meta-item">
+                <span>Match</span>
+                <strong className={`remittance-status ${matchStatus === "MATCHED" ? "good" : matchStatus ? "warn" : ""}`}>
+                  {matchStatus || "—"}
+                </strong>
               </div>
-            ) : null}
+              <div className="remittance-meta-item">
+                <span>Same-day short</span>
+                <strong className={sameDayShort != null ? toneForAmount(sameDayShort) : ""}>
+                  {sameDayShort == null ? "—" : `₹${currency(sameDayShort)}`}
+                </strong>
+              </div>
+              <div className="remittance-meta-item">
+                <span>Final pending</span>
+                <strong>{match ? `₹${currency(match.finalPendingTotal)}` : "—"}</strong>
+              </div>
+              <div className="remittance-meta-item">
+                <span>Codes</span>
+                <strong>{remittance.remittanceCodes.length ? remittance.remittanceCodes.join(", ") : "—"}</strong>
+              </div>
+            </div>
 
             {isShortOverLimit ? (
-              <div className="alert danger" style={{ marginTop: 12 }}>
-                <strong>Submit disabled — short over ₹{SHORT_BLOCK_RUPEES}</strong>
+              <div className="alert danger remittance-alert">
+                <strong>Submit disabled — page short over ₹{SHORT_BLOCK_RUPEES}</strong>
                 <span>
-                  Cash on this page is ₹{currency(Math.abs(difference ?? 0))} below remittance total.
-                  Clear the short in SCC / cash entry, then Validate again.
+                  Page cash is ₹{currency(Math.abs(pageVsRemittance ?? 0))} below remittance.
+                  Clear short, then Validate again.
                 </span>
               </div>
             ) : null}
 
-            {expectedCashMismatch ? (
-              <div className="alert danger" style={{ marginTop: 12 }}>
-                <strong>Submit disabled — remittance ≠ expected cash</strong>
+            {unresolvedPending ? (
+              <div className="alert danger remittance-alert">
+                <strong>Submit disabled — pending cash ledger</strong>
                 <span>
-                  Remittance ₹{currency(remittance.remittanceTotalCash)} does not match expectedCash.totalReceived
-                  ₹{currency(expectedCashTotal ?? 0)}
-                  {expectedVsRemittanceDiff != null ? ` (difference ₹${currency(expectedVsRemittanceDiff)})` : ""}.
-                  Clear this in SCC, then Validate again.
+                  Final pending ₹{currency(match?.finalPendingTotal ?? 0)} is still open.
+                  Open the ledger, clear forwarded/pending cash in SCC, then Validate again.
+                </span>
+              </div>
+            ) : null}
+
+            {sameDayShortBlocked ? (
+              <div className="alert danger remittance-alert">
+                <strong>Submit disabled — same-day remittance short</strong>
+                <span>
+                  Expected ₹{currency(match?.sameDayExpectedCashTotal ?? 0)} vs remittance ₹{currency(match?.sameDayRemittanceTotalCash ?? 0)}
+                  (short ₹{currency(match?.sameDayShortAmount ?? 0)}). Clear in SCC, then Validate again.
                 </span>
               </div>
             ) : null}
 
             {!isShortOverLimit && needsDifferenceRemarks ? (
-              <div className="alert" style={{ marginTop: 12 }}>
+              <div className="alert remittance-alert">
                 <strong>Cash difference</strong>
-                <span>Difference of ₹{currency(difference ?? 0)} — remarks required when validating.</span>
+                <span>Difference of ₹{currency(pageVsRemittance ?? 0)} — remarks required when validating.</span>
               </div>
             ) : null}
 
-            <RemittanceTable
-              title="Creation list"
-              badge="Remittance pending"
-              rows={remittance.created}
-              emptyLabel="No created (pending) remittances."
-            />
-            <RemittanceTable
-              title="Submitted list"
-              badge={`Total ₹${currency(remittance.submittedTotal)}`}
-              rows={remittance.submitted}
-              emptyLabel="No submitted remittances."
-            />
-            {remittance.remittanceCodes.length ? (
-              <p className="subtle" style={{ marginTop: 10 }}>
-                Remittance codes: {remittance.remittanceCodes.join(", ")}
-              </p>
+            {hasPendingCreated ? (
+              <div className="alert remittance-alert">
+                <strong>Created remittance pending</strong>
+                <span>{remittance.createdCount} created remittance(s) totaling ₹{currency(remittance.createdTotal)} are not submitted yet.</span>
+              </div>
             ) : null}
+
+            <div className="remittance-tables">
+              <RemittanceRowsTable
+                title="Creation list"
+                meta="Remittance pending"
+                rows={remittance.created}
+                emptyLabel="No created (pending) remittances."
+              />
+              <RemittanceRowsTable
+                title="Submitted list"
+                meta={`Total ₹${currency(remittance.submittedTotal)}`}
+                rows={remittance.submitted}
+                emptyLabel="No submitted remittances."
+              />
+            </div>
           </>
         ) : (
-          <p className="subtle" style={{ marginTop: 12 }}>
-            Click Validate deposit to load creation and submitted remittance lists from SCC.
-          </p>
+          <div className="remittance-empty-state">
+            <strong>No remittance loaded yet</strong>
+            <p>Click Validate deposit to pull SCC remittance, match summary, and pending cash ledger.</p>
+          </div>
         )}
       </section>
 
-      <section className={`reconciliation-gate final ${!canSubmitFinal ? "locked" : ""}`} style={{ marginTop: 16 }}>
+      <section className={`reconciliation-gate final remittance-final-panel ${!canSubmitFinal ? "locked" : ""}`}>
         <div className="reconciliation-gate-head">
-          <div><span>Final</span><strong>Close station day</strong></div>
-          <span className="count-badge">
-            {isFinalSubmitted
-              ? "Final submitted"
-              : canSubmitFinal
-                ? "Ready"
-                : submitBlocked
-                  ? "Blocked"
-                  : "Pending validation"}
+          <div>
+            <span>Final</span>
+            <strong>Close station day</strong>
+          </div>
+          <span className={`remittance-status-pill ${isFinalSubmitted ? "good" : canSubmitFinal ? "good" : submitBlocked ? "danger" : ""}`}>
+            {isFinalSubmitted ? "Submitted" : canSubmitFinal ? "Ready" : submitBlocked ? "Blocked" : "Pending"}
           </span>
         </div>
-        <p className="subtle">Final close locks all cash entries after remittance validation and clear liability.</p>
+        <p className="subtle">Locks cash entries after remittance validation and clear liability.</p>
         {submitBlocked ? (
-          <div className="alert danger" style={{ marginTop: 10 }}>
+          <div className="alert danger remittance-alert">
             <strong>Submit locked</strong>
             <span>
-              {isShortOverLimit ? `Clear short cash over ₹${SHORT_BLOCK_RUPEES}. ` : ""}
-              {expectedCashMismatch ? "Match remittance total to expectedCash.totalReceived. " : ""}
-              Then Validate again to unlock.
+              {isShortOverLimit ? `Clear page short over ₹${SHORT_BLOCK_RUPEES}. ` : ""}
+              {unresolvedPending ? "Clear pending cash ledger. " : ""}
+              {sameDayShortBlocked ? "Clear same-day remittance short. " : ""}
+              Then Validate again.
             </span>
           </div>
         ) : null}
-        <div className="form-actions" style={{ marginTop: 12 }}>
+        <div className="form-actions">
           <button
             className="button"
             type="button"
@@ -541,7 +756,7 @@ export function DepositRemittancePanel({
         </div>
       </section>
 
-      {showDifferenceModal && remittance && difference != null ? (
+      {showDifferenceModal && remittance && pageVsRemittance != null ? (
         <div className="modal-backdrop" role="presentation">
           <section className="modal-panel wide cash-recon-modal" role="dialog" aria-modal="true" aria-labelledby="remittance-diff-title">
             <div className="panel-head">
@@ -552,19 +767,13 @@ export function DepositRemittancePanel({
               <button className="modal-close" type="button" onClick={() => setShowDifferenceModal(false)} aria-label="Close">×</button>
             </div>
             <div className="panel-body">
-              <div className="reconciliation-final-summary" style={{ marginBottom: 14 }}>
-                <div><span>Page cash</span><strong>₹{currency(collectedCash)}</strong><small>Submitted on page</small></div>
-                <div><span>Remittance total</span><strong>₹{currency(remittance.remittanceTotalCash)}</strong><small>SCC remittance</small></div>
-                <div><span>Difference</span><strong>₹{currency(difference)}</strong><small>Page − remittance</small></div>
+              <div className="remittance-kpi-grid compact" style={{ marginBottom: 14 }}>
+                <div className="remittance-kpi"><span>Page cash</span><strong>₹{currency(collectedCash)}</strong></div>
+                <div className="remittance-kpi"><span>Remittance</span><strong>₹{currency(remittance.remittanceTotalCash)}</strong></div>
+                <div className={`remittance-kpi ${toneForAmount(-(pageVsRemittance))}`}>
+                  <span>Difference</span><strong>₹{currency(pageVsRemittance)}</strong>
+                </div>
               </div>
-              {hasPendingCreated ? (
-                <p className="subtle" style={{ marginBottom: 12 }}>
-                  There {remittance.createdCount === 1 ? "is" : "are"} {remittance.createdCount} created remittance(s) still pending submission in SCC.
-                </p>
-              ) : null}
-              <p className="subtle" style={{ marginBottom: 12 }}>
-                Enter remarks explaining this difference before deposit can be marked validated.
-              </p>
               <label style={{ display: "grid", gap: 6 }}>
                 Remarks
                 <textarea
@@ -599,25 +808,17 @@ export function DepositRemittancePanel({
                 <h2 id="liability-remind-title">Complete liability before COD submit</h2>
                 <p className="subtle">{stationCode} · {businessDate}</p>
               </div>
-              <button
-                className="modal-close"
-                type="button"
-                disabled={submitting}
-                onClick={() => setShowLiabilityModal(false)}
-                aria-label="Close"
-              >
-                ×
-              </button>
+              <button className="modal-close" type="button" disabled={submitting} onClick={() => setShowLiabilityModal(false)} aria-label="Close">×</button>
             </div>
             <div className="panel-body">
               <p className="subtle" style={{ marginBottom: 12 }}>
-                Station cash liability in SCC must be clear (₹0 short/excess) before you can submit final COD.
+                Station cash liability in SCC must be clear before final COD submit.
               </p>
               {checkingLiability || !liability ? (
                 <p className="subtle">Checking SCC liability…</p>
               ) : liability.isClear ? (
                 <>
-                  <div className="alert" style={{ marginBottom: 14 }}>
+                  <div className="alert remittance-alert">
                     <strong>Liability clear</strong>
                     <span>
                       Expected ₹{currency(liability.cashSummary.expectedAmount)} · Actual ₹{currency(liability.cashSummary.actualAmount)} ·
@@ -625,9 +826,7 @@ export function DepositRemittancePanel({
                     </span>
                   </div>
                   <div className="form-actions">
-                    <button className="button secondary" type="button" disabled={submitting} onClick={() => setShowLiabilityModal(false)}>
-                      Cancel
-                    </button>
+                    <button className="button secondary" type="button" disabled={submitting} onClick={() => setShowLiabilityModal(false)}>Cancel</button>
                     <button className="button" type="button" disabled={submitting} onClick={() => void runFinalSubmit()}>
                       {submitting ? "Submitting…" : "Submit final COD"}
                     </button>
@@ -635,22 +834,16 @@ export function DepositRemittancePanel({
                 </>
               ) : (
                 <>
-                  <div className="alert danger" style={{ marginBottom: 14 }}>
+                  <div className="alert danger remittance-alert">
                     <strong>Liability still open</strong>
                     <span>
                       Expected ₹{currency(liability.cashSummary.expectedAmount)} · Actual ₹{currency(liability.cashSummary.actualAmount)} ·
-                      Short/excess ₹{currency(liability.cashSummary.shortExcessAmount)} · Count {liability.cashSummary.count}.
-                      Complete liability in SCC, then recheck.
+                      Short/excess ₹{currency(liability.cashSummary.shortExcessAmount)}. Complete in SCC, then recheck.
                     </span>
                   </div>
                   <div className="form-actions">
                     <button className="button secondary" type="button" onClick={() => setShowLiabilityModal(false)}>Close</button>
-                    <button
-                      className="button"
-                      type="button"
-                      disabled={checkingLiability}
-                      onClick={() => void openLiabilityGate()}
-                    >
+                    <button className="button" type="button" disabled={checkingLiability} onClick={() => void openLiabilityGate()}>
                       {checkingLiability ? "Checking…" : "Recheck liability"}
                     </button>
                   </div>
@@ -659,6 +852,15 @@ export function DepositRemittancePanel({
             </div>
           </section>
         </div>
+      ) : null}
+
+      {showLedgerModal && remittance ? (
+        <LedgerModal
+          stationCode={stationCode}
+          businessDate={businessDate}
+          remittance={remittance}
+          onClose={() => setShowLedgerModal(false)}
+        />
       ) : null}
     </>
   );

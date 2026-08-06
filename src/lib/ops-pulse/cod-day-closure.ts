@@ -278,9 +278,8 @@ export async function finalizeCodClosure({
     if (closure.deposit_check_status !== "Passed" && closure.deposit_check_status !== "Exception approved") {
       throw new Error("Validate bank deposit remittance before final COD submission.");
     }
-    const [remittance, driverRecon, liability] = await Promise.all([
+    const [remittance, liability] = await Promise.all([
       fetchRemittance({ stationCode, date: businessDate }),
-      fetchDriverReconciliation({ stationCode, date: businessDate }),
       fetchLiabilitySummary({ stationCode, date: businessDate })
     ]);
     remittanceExpected = remittance.remittanceTotalCash;
@@ -293,13 +292,28 @@ export async function finalizeCodClosure({
         `Cash is short by more than ₹10 vs remittance (₹${Math.abs(difference).toFixed(2)}). Clear the short before final submission.`
       );
     }
-    const expectedCashTotal = Number(driverRecon.expectedCash?.totalReceived ?? NaN);
-    if (Number.isFinite(expectedCashTotal)) {
-      const expectedDiff = Number((remittance.remittanceTotalCash - expectedCashTotal).toFixed(2));
-      if (Math.abs(expectedDiff) >= 0.01) {
+    const match = remittance.matchSummary;
+    if (match) {
+      if (match.finalPendingTotal > 0.01) {
         throw new Error(
-          `Remittance ₹${remittance.remittanceTotalCash.toFixed(2)} does not match expectedCash.totalReceived ₹${expectedCashTotal.toFixed(2)}. Clear this before final submission.`
+          `Pending cash ledger still has ₹${match.finalPendingTotal.toFixed(2)} unresolved. Clear forwarded/pending remittance before final submission.`
         );
+      }
+      if (match.mode === "sameDay" && match.sameDayShortAmount > 10) {
+        throw new Error(
+          `Same-day remittance short is ₹${match.sameDayShortAmount.toFixed(2)} (expected ₹${match.sameDayExpectedCashTotal.toFixed(2)}, remittance ₹${match.sameDayRemittanceTotalCash.toFixed(2)}). Clear before final submission.`
+        );
+      }
+    } else {
+      const driverRecon = await fetchDriverReconciliation({ stationCode, date: businessDate });
+      const expectedCashTotal = Number(driverRecon.expectedCash?.totalReceived ?? NaN);
+      if (Number.isFinite(expectedCashTotal)) {
+        const expectedDiff = Number((remittance.remittanceTotalCash - expectedCashTotal).toFixed(2));
+        if (Math.abs(expectedDiff) >= 0.01) {
+          throw new Error(
+            `Remittance ₹${remittance.remittanceTotalCash.toFixed(2)} does not match expected cash ₹${expectedCashTotal.toFixed(2)}. Clear this before final submission.`
+          );
+        }
       }
     }
     if (!liability.isClear) {
@@ -322,7 +336,6 @@ export async function finalizeCodClosure({
       ...remittance,
       difference_amount: difference,
       collected_cash: collectedCod,
-      expected_cash_total: Number.isFinite(expectedCashTotal) ? expectedCashTotal : null,
       override_remarks: overrideRemarks || null,
       validated_at: new Date().toISOString()
     };
