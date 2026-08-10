@@ -34,6 +34,7 @@ export const accessPages = [
   { code: "daily_submission", name: "Daily Submission", sort_order: 85 },
   { code: "cod", name: "COD", sort_order: 86 },
   { code: "cod_executive_reconciliation", name: "Executive Reconciliation", sort_order: 87 },
+  { code: "cod_cash_in_associate", name: "Cash In Associate", sort_order: 87.5 },
   { code: "cod_submission", name: "COD Submission", sort_order: 88 },
   { code: "cod_validation", name: "COD Validation", sort_order: 89 },
   { code: "cod_reports", name: "COD Reports", sort_order: 90 },

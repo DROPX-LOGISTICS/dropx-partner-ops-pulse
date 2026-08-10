@@ -13,6 +13,7 @@ import {
   type RemittanceRowNormalized,
   type RemittanceSummaryNormalized
 } from "@/lib/ops-pulse/cash-recon-types";
+import type { CiaNetworkPayload, CiaPendingDriver, CiaStationPayload, CiaStationRow } from "@/lib/ops-pulse/cia-types";
 
 function workerConfig() {
   const baseUrl = (process.env.CASH_RECON_WORKER_URL || process.env.NEXT_PUBLIC_CASH_RECON_WORKER_URL || "").trim().replace(/\/$/, "");
@@ -23,6 +24,26 @@ function workerConfig() {
 export function isCashReconWorkerConfigured() {
   const { baseUrl, adminKey } = workerConfig();
   return Boolean(baseUrl && adminKey);
+}
+
+async function parseWorkerResponse(response: Response, text: string) {
+  let payload: unknown = null;
+  try {
+    payload = text ? JSON.parse(text) : null;
+  } catch {
+    payload = { raw: text };
+  }
+
+  if (!response.ok) {
+    const message = payload && typeof payload === "object" && "message" in payload
+      ? String((payload as { message?: unknown }).message)
+      : payload && typeof payload === "object" && "error" in payload
+        ? String((payload as { error?: unknown }).error)
+        : text || `Cash recon worker returned ${response.status}`;
+    throw new Error(message);
+  }
+
+  return payload;
 }
 
 async function postWorkerOnce<T>(path: string, body: { stationCode: string; date: string }): Promise<T> {
@@ -45,23 +66,32 @@ async function postWorkerOnce<T>(path: string, body: { stationCode: string; date
   });
 
   const text = await response.text();
-  let payload: unknown = null;
-  try {
-    payload = text ? JSON.parse(text) : null;
-  } catch {
-    payload = { raw: text };
+  return (await parseWorkerResponse(response, text)) as T;
+}
+
+async function getWorkerOnce<T>(path: string, query?: Record<string, string>): Promise<T> {
+  const { baseUrl, adminKey } = workerConfig();
+  if (!baseUrl || !adminKey) {
+    throw new Error("Cash recon worker is not configured. Set CASH_RECON_WORKER_URL and CASH_RECON_ADMIN_KEY.");
   }
 
-  if (!response.ok) {
-    const message = payload && typeof payload === "object" && "message" in payload
-      ? String((payload as { message?: unknown }).message)
-      : payload && typeof payload === "object" && "error" in payload
-        ? String((payload as { error?: unknown }).error)
-        : text || `Cash recon worker returned ${response.status}`;
-    throw new Error(message);
+  const url = new URL(`${baseUrl}${path}`);
+  if (query) {
+    for (const [key, value] of Object.entries(query)) {
+      if (value) url.searchParams.set(key, value);
+    }
   }
 
-  return payload as T;
+  const response = await fetch(url.toString(), {
+    method: "GET",
+    headers: {
+      "x-admin-key": adminKey
+    },
+    cache: "no-store"
+  });
+
+  const text = await response.text();
+  return (await parseWorkerResponse(response, text)) as T;
 }
 
 function isTransientPortalSessionError(message: string) {
@@ -80,6 +110,17 @@ async function postWorker<T>(path: string, body: { stationCode: string; date: st
     if (!isTransientPortalSessionError(message)) throw error;
     await new Promise((resolve) => setTimeout(resolve, 1500));
     return postWorkerOnce<T>(path, body);
+  }
+}
+
+async function getWorker<T>(path: string, query?: Record<string, string>): Promise<T> {
+  try {
+    return await getWorkerOnce<T>(path, query);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!isTransientPortalSessionError(message)) throw error;
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    return getWorkerOnce<T>(path, query);
   }
 }
 
@@ -388,5 +429,129 @@ export async function fetchRemittance(params: {
     },
     matchSummary,
     ledger: mapRemittanceLedger(raw.ledger)
+  };
+}
+
+function mapCiaSummary(raw: Record<string, unknown> | null | undefined) {
+  return {
+    ciaTotal: moneyValue(raw?.ciaTotal as never),
+    cashAtStationTotal: moneyValue(raw?.cashAtStationTotal as never),
+    ageingTotal: moneyValue((raw?.ageingTotal ?? raw?.ciaTotal) as never),
+    depositedTotal: moneyValue(raw?.depositedTotal as never),
+    pendingLiability: moneyValue(raw?.pendingLiability as never),
+    clearedInWindow: moneyValue(raw?.clearedInWindow as never),
+    cashDifference: moneyValue((raw?.cashDifference ?? raw?.difference) as never),
+    difference: moneyValue((raw?.difference ?? raw?.cashDifference) as never),
+    shipmentCount: Number(raw?.shipmentCount ?? 0) || 0,
+    pendingDriverCount: Number(raw?.pendingDriverCount ?? 0) || 0,
+    limitedByRemittanceWindow: Boolean(raw?.limitedByRemittanceWindow)
+  };
+}
+
+function mapCiaStationRow(raw: Record<string, unknown>): CiaStationRow {
+  const summary = mapCiaSummary(raw);
+  return {
+    stationCode: String(raw.stationCode ?? "").trim().toUpperCase(),
+    status: String(raw.status ?? "ok"),
+    error: raw.error == null ? null : String(raw.error),
+    fetchedAt: raw.fetchedAt == null ? null : String(raw.fetchedAt),
+    accountKey: raw.accountKey == null ? null : String(raw.accountKey),
+    ...summary
+  };
+}
+
+function mapCiaPendingDriver(raw: Record<string, unknown>): CiaPendingDriver {
+  const shipments = Array.isArray(raw.shipments)
+    ? raw.shipments.map((item) => {
+        const shipment = (item ?? {}) as Record<string, unknown>;
+        return {
+          trackingId: String(shipment.trackingId ?? "").trim() || "-",
+          shipmentNo: String(shipment.shipmentNo ?? "").trim(),
+          pendingAmount: moneyValue(shipment.pendingAmount as never),
+          keptOnDate: shipment.keptOnDate == null ? null : String(shipment.keptOnDate),
+          clearedOnDate: shipment.clearedOnDate == null ? null : String(shipment.clearedOnDate),
+          keptDays: typeof shipment.keptDays === "number" ? shipment.keptDays : null,
+          status: String(shipment.status ?? "pending").trim() || "pending",
+          remittanceId: shipment.remittanceId == null ? null : String(shipment.remittanceId),
+          remittanceCode: shipment.remittanceCode == null ? null : String(shipment.remittanceCode)
+        };
+      })
+    : [];
+
+  return {
+    driverName: String(raw.driverName ?? "").trim() || "Unknown driver",
+    tasId: raw.tasId == null ? null : String(raw.tasId),
+    employeeId: raw.employeeId == null || raw.employeeId === "" ? null : String(raw.employeeId),
+    operationalStatus: raw.operationalStatus == null ? null : String(raw.operationalStatus),
+    mappedFromWorkforce: Boolean(raw.mappedFromWorkforce),
+    amount: moneyValue(raw.amount as never),
+    shipmentCount: Number(raw.shipmentCount ?? shipments.length) || shipments.length,
+    dates: Array.isArray(raw.dates) ? raw.dates.map((d) => String(d)).filter(Boolean).sort() : [],
+    shipments
+  };
+}
+
+export async function fetchCiaNetwork(): Promise<CiaNetworkPayload> {
+  const raw = await getWorker<Record<string, unknown>>("/api/admin/executive/cash-in-associate/network");
+  const runRaw = raw.run && typeof raw.run === "object" ? (raw.run as Record<string, unknown>) : null;
+  const totalsRaw = raw.totals && typeof raw.totals === "object" ? (raw.totals as Record<string, unknown>) : {};
+  const windowRaw = raw.window && typeof raw.window === "object" ? (raw.window as Record<string, unknown>) : {};
+  const stations = Array.isArray(raw.stations)
+    ? raw.stations.map((row) => mapCiaStationRow((row ?? {}) as Record<string, unknown>))
+    : [];
+
+  return {
+    status: String(raw.status ?? "ok"),
+    asOfDate: String(raw.asOfDate ?? ""),
+    window: {
+      from: String(windowRaw.from ?? ""),
+      to: String(windowRaw.to ?? "")
+    },
+    run: runRaw
+      ? {
+          id: String(runRaw.id ?? ""),
+          status: String(runRaw.status ?? ""),
+          startedAt: runRaw.startedAt == null ? null : String(runRaw.startedAt),
+          finishedAt: runRaw.finishedAt == null ? null : String(runRaw.finishedAt),
+          stationsTotal: Number(runRaw.stationsTotal ?? stations.length) || stations.length,
+          stationsOk: Number(runRaw.stationsOk ?? 0) || 0,
+          stationsFailed: Number(runRaw.stationsFailed ?? 0) || 0
+        }
+      : null,
+    totals: mapCiaSummary(totalsRaw),
+    stations,
+    cached: Boolean(raw.cached)
+  };
+}
+
+export async function fetchCiaStation(stationCode: string): Promise<CiaStationPayload> {
+  const code = stationCode.trim().toUpperCase();
+  const raw = await getWorker<Record<string, unknown>>("/api/admin/executive/cash-in-associate", {
+    stationCode: code
+  });
+  const summaryRaw = raw.summary && typeof raw.summary === "object" ? (raw.summary as Record<string, unknown>) : {};
+  const windowRaw = raw.window && typeof raw.window === "object" ? (raw.window as Record<string, unknown>) : {};
+  const pendingDrivers = Array.isArray(raw.pendingDrivers)
+    ? raw.pendingDrivers
+        .map((row) => mapCiaPendingDriver((row ?? {}) as Record<string, unknown>))
+        .sort((a, b) => b.amount - a.amount)
+    : [];
+
+  return {
+    status: String(raw.status ?? "ok"),
+    asOfDate: String(raw.asOfDate ?? ""),
+    window: {
+      from: String(windowRaw.from ?? ""),
+      to: String(windowRaw.to ?? "")
+    },
+    runStatus: raw.runStatus == null ? null : String(raw.runStatus),
+    runId: raw.runId == null ? null : String(raw.runId),
+    stationCode: String(raw.stationCode ?? code).toUpperCase(),
+    snapshotStatus: String(raw.snapshotStatus ?? "ok"),
+    error: raw.error == null ? null : String(raw.error),
+    fetchedAt: raw.fetchedAt == null ? null : String(raw.fetchedAt),
+    summary: mapCiaSummary(summaryRaw),
+    pendingDrivers,
+    cached: Boolean(raw.cached)
   };
 }

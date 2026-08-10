@@ -2,6 +2,7 @@ import Link from "next/link";
 
 const codSections = [
   { href: "/ops-pulse/cod/executive-reconciliation", key: "executive-reconciliation", label: "Executive Reconciliation", visible: true },
+  { href: "/ops-pulse/cod/cash-in-associate", key: "cash-in-associate", label: "Cash In Associate", visible: true },
   { href: "/ops-pulse/cod/submission", key: "submission", label: "COD Submission", visible: true },
   { href: "/ops-pulse/cod/reports", key: "reports", label: "COD Reports", visible: true },
   { href: "/ops-pulse/cod/validation", key: "validation", label: "Validation", visible: false },

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { NavigationProgressHost } from "@/components/navigation-progress-host";
 import "./globals.css";
+import "./cia-associate.css";
 
 export const metadata: Metadata = {
   title: {
