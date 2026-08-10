@@ -139,17 +139,31 @@ function enrichCollectCash(
   });
 }
 
-function isUnmappedDriverLabel(name: string, shipmentType: string, employeeId: string) {
+function isPlaceholderUnmappedName(name: string) {
   const normalizedName = name.trim().toLowerCase();
+  return normalizedName.startsWith("unmapped driver")
+    || normalizedName === "unassigned driver"
+    || /^unmapped\s*[·•.-]/.test(normalizedName);
+}
+
+function requiresManualDriverName(params: {
+  name: string;
+  shipmentType: string;
+  employeeId: string;
+  mappedFromWorkforce?: boolean;
+}) {
+  const { name, shipmentType, employeeId, mappedFromWorkforce } = params;
+  if (mappedFromWorkforce && !isPlaceholderUnmappedName(name)) return false;
   const normalizedType = shipmentType.trim().toLowerCase();
+  if (normalizedType.includes("workforce") && !isPlaceholderUnmappedName(name)) return false;
   if (normalizedType.includes("unmapped")) return true;
-  if (normalizedName.startsWith("unmapped driver")) return true;
-  if ((!employeeId || employeeId === "0") && normalizedName.startsWith("unmapped")) return true;
+  if (isPlaceholderUnmappedName(name)) return true;
+  if ((!employeeId || employeeId === "0") && name.trim().toLowerCase().startsWith("unmapped")) return true;
   return false;
 }
 
 function mapMissingFromDer(apiMissing: CashReconAssociate[]): AssociateOption[] {
-  const rows = apiMissing
+  const rows: AssociateOption[] = apiMissing
     .filter((row) => String(row.providerEmployeeId ?? "").trim().toLowerCase() !== "__other__")
     .map((row) => {
       const employeeId = String(row.employeeId ?? "").trim();
@@ -157,9 +171,16 @@ function mapMissingFromDer(apiMissing: CashReconAssociate[]): AssociateOption[] 
       const providerEmployeeId = employeeId && employeeId !== "0" ? employeeId : fallbackId;
       const rawName = String(row.displayName || row.name || "").trim();
       const shipmentType = row.shipmentType || "Cash recon worker";
-      const requiresManualName = isUnmappedDriverLabel(rawName, shipmentType, employeeId);
-      const name = requiresManualName && providerEmployeeId
-        ? (rawName.match(/^Unmapped driver/i) ? `Unmapped · ${providerEmployeeId}` : rawName)
+      const mappedFromWorkforce = row.mappedFromWorkforce === true
+        || shipmentType.toLowerCase().includes("workforce");
+      const requiresManualName = requiresManualDriverName({
+        name: rawName,
+        shipmentType,
+        employeeId,
+        mappedFromWorkforce
+      });
+      const name = requiresManualName && providerEmployeeId && /^Unmapped driver/i.test(rawName)
+        ? `Unmapped · ${providerEmployeeId}`
         : rawName;
       return {
         name,
@@ -169,7 +190,8 @@ function mapMissingFromDer(apiMissing: CashReconAssociate[]): AssociateOption[] 
         expectedAmount: Number(row.expected) || 0,
         pendingRecon: Number(row.pendingRecon) || 0,
         breakdown: Array.isArray(row.breakdown) ? row.breakdown : [],
-        requiresManualName
+        requiresManualName,
+        mappedFromWorkforce
       } satisfies AssociateOption;
     })
     .filter((row) => row.providerEmployeeId && row.name);
@@ -198,7 +220,8 @@ function toCashReconAssociate(row: AssociateOption, source: CashReconAssociate["
     pendingRecon: Number(row.pendingRecon) || 0,
     breakdown: row.breakdown ?? [],
     source,
-    shipmentType: row.shipmentType
+    shipmentType: row.shipmentType,
+    mappedFromWorkforce: row.mappedFromWorkforce
   };
 }
 

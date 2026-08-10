@@ -21,6 +21,8 @@ export type CashReconAssociate = {
   breakdown: CashReconPendingBreakdown[];
   source: "matched" | "extra" | "other" | "driver_only";
   shipmentType: string;
+  /** True when ageing driver was not in getDrivers but name was resolved from workforce. */
+  mappedFromWorkforce?: boolean;
 };
 
 export type CashReconDriver = {
@@ -51,6 +53,8 @@ export type ExpectedCashByDriver = {
   tasId?: string | null;
   /** False when ageing driverId was not in getDrivers. */
   mappedToActiveDriver?: boolean | null;
+  /** True when name was resolved from workforce for a driver not in getDrivers. */
+  mappedFromWorkforce?: boolean | null;
   totalReceived?: number | null;
   shipmentCount?: number | null;
   shipments?: ExpectedCashShipment[] | null;
@@ -450,6 +454,7 @@ function appendUnmappedExpectedCash(
     const providerEmployeeId = (employeeId && employeeId !== "0" ? employeeId : null)
       || tasId
       || "__unassigned_cash__";
+    const mappedFromWorkforce = cashRow.mappedFromWorkforce === true;
     const fullName = String(cashRow.driverName ?? "").trim()
       || (tasId ? `Unmapped driver (${tasId})` : "Unassigned driver");
 
@@ -462,7 +467,10 @@ function appendUnmappedExpectedCash(
       pendingRecon: 0,
       breakdown: [],
       source: "extra",
-      shipmentType: "Ageing cash (unmapped driver)"
+      shipmentType: mappedFromWorkforce
+        ? "Ageing cash (workforce)"
+        : "Ageing cash (unmapped driver)",
+      mappedFromWorkforce
     };
     missingFromDer.push(row);
     pool.push(row);
@@ -736,6 +744,7 @@ export function buildRequiredCashAssociates(
         (employeeId && String(item.employeeId ?? "").trim().toUpperCase() === employeeId.toUpperCase())
         || (tasId && String(item.tasId ?? "").trim().toUpperCase() === tasId.toUpperCase())
       );
+      const mappedFromWorkforce = cashRow.mappedFromWorkforce === true;
       const fullName = String(driver?.driverName ?? cashRow.driverName ?? "").trim()
         || (tasId ? `Unmapped driver (${tasId})` : "Unassigned driver");
       upsert({
@@ -748,8 +757,9 @@ export function buildRequiredCashAssociates(
         breakdown: [],
         source: "extra",
         shipmentType: cashRow.mappedToActiveDriver === false
-          ? "Ageing cash (unmapped driver)"
-          : "Cash recon worker"
+          ? (mappedFromWorkforce ? "Ageing cash (workforce)" : "Ageing cash (unmapped driver)")
+          : "Cash recon worker",
+        mappedFromWorkforce
       });
     }
     return Array.from(byKey.values()).sort((a, b) =>

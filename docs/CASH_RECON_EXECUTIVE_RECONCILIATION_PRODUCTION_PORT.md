@@ -120,8 +120,19 @@ Pending example fields when blocked:
         "driverName": "Prakash Thakur / DROP / 208003820",
         "tasId": "ALIY31TUBQNTG",
         "mappedToActiveDriver": true,
+        "mappedFromWorkforce": false,
         "totalReceived": 15383.2,
         "shipmentCount": 12,
+        "shipments": []
+      },
+      {
+        "employeeId": null,
+        "driverName": "Manesh M V",
+        "tasId": "A349AUDYFXWN25",
+        "mappedToActiveDriver": false,
+        "mappedFromWorkforce": true,
+        "totalReceived": 15779.12,
+        "shipmentCount": 23,
         "shipments": []
       },
       {
@@ -129,6 +140,7 @@ Pending example fields when blocked:
         "driverName": "Unmapped driver (A2S80CSWXBRVK9)",
         "tasId": "A2S80CSWXBRVK9",
         "mappedToActiveDriver": false,
+        "mappedFromWorkforce": false,
         "totalReceived": 1200.5,
         "shipmentCount": 2,
         "shipments": []
@@ -138,7 +150,7 @@ Pending example fields when blocked:
 }
 ```
 
-Match `byDriver` to Collect / Missing DER by `employeeId` or `tasId`. Rows with `mappedToActiveDriver: false` (ageing `driverId` not in getDrivers) still count toward totals and must appear under **Missing DER** / Step-2 cash gate using `tasId` as the associate id. If a driver has no `byDriver` row and `expectedCash` payload exists → expected = 0 (not recon `paymentInfo.expected`). Legacy fallback to `paymentInfo.expected` only when worker omits `expectedCash` entirely.
+Match `byDriver` to Collect / Missing DER by `employeeId` or `tasId`. Rows with `mappedToActiveDriver: false` (ageing `driverId` not in getDrivers) still count toward totals and must appear under **Missing DER** / Step-2 cash gate using `tasId` as the associate id. When `mappedFromWorkforce: true`, the worker has already resolved a real `driverName` — Missing DER shows that name and does **not** require ops to type it. Only placeholder names (`Unmapped driver (tasId)`) still require manual name entry. If a driver has no `byDriver` row and `expectedCash` payload exists → expected = 0 (not recon `paymentInfo.expected`). Legacy fallback to `paymentInfo.expected` only when worker omits `expectedCash` entirely.
 
 ### 3.1b Next proxy response (what the UI consumes)
 

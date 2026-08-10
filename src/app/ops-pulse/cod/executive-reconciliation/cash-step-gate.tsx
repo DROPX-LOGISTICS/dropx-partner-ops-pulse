@@ -69,7 +69,7 @@ function IncompleteDriversModal({
         <div className="panel-body">
           <p className="subtle" style={{ marginBottom: 12 }}>
             Select each driver in <strong>Collect cash</strong> or <strong>Add associate missing from DER</strong>,
-            count denominations, and save. Unmapped drivers show a Driver ID — type the employee name when entering cash.
+            count denominations, and save. Drivers without a resolved name still show a Driver ID — type the employee name when entering cash.
             Continue unlocks only when all are entered.
           </p>
           <div className="table-wrap">
@@ -84,13 +84,18 @@ function IncompleteDriversModal({
               <tbody>
                 {missing.length ? missing.map((row) => {
                   const label = row.displayName || row.name;
-                  const unmapped = /^unmapped driver/i.test(String(label))
-                    || String(row.shipmentType ?? "").toLowerCase().includes("unmapped");
+                  const shipmentType = String(row.shipmentType ?? "").toLowerCase();
+                  const needsTypedName = !row.mappedFromWorkforce
+                    && !shipmentType.includes("workforce")
+                    && (
+                      /^unmapped driver/i.test(String(label))
+                      || shipmentType.includes("unmapped")
+                    );
                   return (
                     <tr key={row.providerEmployeeId}>
                       <td>
                         <strong>{label}</strong>
-                        {unmapped ? (
+                        {needsTypedName ? (
                           <div className="subtle" style={{ marginTop: 4 }}>
                             Type employee name when entering cash (Missing DER).
                           </div>
