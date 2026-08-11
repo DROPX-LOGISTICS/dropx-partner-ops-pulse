@@ -23,14 +23,47 @@ function moneyClass(value: number) {
   return "cia-money";
 }
 
+function validYmd(value: string | null | undefined) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(value ?? ""));
+}
+
+function inSelectedRange(date: string | null | undefined, fromDate: string, toDate: string) {
+  const raw = String(date ?? "").trim();
+  if (!validYmd(raw)) return true;
+  if (fromDate && raw < fromDate) return false;
+  if (toDate && raw > toDate) return false;
+  return true;
+}
+
+function filterDriversByDateRange(drivers: CiaPendingDriver[], fromDate: string, toDate: string) {
+  return drivers
+    .map((driver) => {
+      const shipments = driver.shipments.filter((shipment) => inSelectedRange(shipment.keptOnDate, fromDate, toDate));
+      if (shipments.length === 0) return null;
+      const dates = [...new Set(shipments.map((shipment) => shipment.keptOnDate).filter(Boolean))] as string[];
+      const amount = shipments.reduce((sum, shipment) => sum + shipment.pendingAmount, 0);
+      return {
+        ...driver,
+        amount,
+        shipmentCount: shipments.length,
+        dates,
+        shipments
+      };
+    })
+    .filter((driver): driver is CiaPendingDriver => Boolean(driver))
+    .sort((a, b) => b.amount - a.amount);
+}
+
 function buildStationHref(
   pathname: string,
-  params: { reportDate?: string; view?: DetailView; focusDay?: string }
+  params: { reportDate?: string; view?: DetailView; focusDay?: string; fromDate?: string; toDate?: string }
 ) {
   const next = new URLSearchParams();
   if (params.reportDate) next.set("reportDate", params.reportDate);
   if (params.view && params.view !== "driver") next.set("view", params.view);
   if (params.focusDay) next.set("focusDay", params.focusDay);
+  if (params.fromDate) next.set("from", params.fromDate);
+  if (params.toDate) next.set("to", params.toDate);
   const query = next.toString();
   return query ? `${pathname}?${query}` : pathname;
 }
@@ -59,6 +92,8 @@ export function CiaStationDetail({
 
   const view: DetailView = searchParams.get("view") === "date" ? "date" : "driver";
   const focusDay = searchParams.get("focusDay")?.trim() ?? "";
+  const fromDate = validYmd(searchParams.get("from")) ? String(searchParams.get("from")) : windowFrom;
+  const toDate = validYmd(searchParams.get("to")) ? String(searchParams.get("to")) : windowTo;
 
   const yesterday = addDaysYmd(todayIstYmd(), -1);
   const earliestReport = addDaysYmd(todayIstYmd(), -REPORT_LOOKBACK_DAYS);
@@ -68,7 +103,11 @@ export function CiaStationDetail({
     return [...set].sort((a, b) => b.localeCompare(a));
   }, [availableReportDates, reportDate]);
 
-  const dateRows = useMemo(() => buildCiaDateRows(drivers), [drivers]);
+  const rangeDrivers = useMemo(
+    () => filterDriversByDateRange(drivers, fromDate, toDate),
+    [drivers, fromDate, toDate]
+  );
+  const dateRows = useMemo(() => buildCiaDateRows(rangeDrivers), [rangeDrivers]);
   const filteredDateRows = useMemo(() => {
     if (!focusDay) return dateRows;
     return dateRows.filter((row) => row.date === focusDay);
@@ -78,10 +117,14 @@ export function CiaStationDetail({
     reportDate?: string;
     view?: DetailView;
     focusDay?: string | null;
+    fromDate?: string;
+    toDate?: string;
   }) {
     const href = buildStationHref(pathname, {
       reportDate: params.reportDate !== undefined ? params.reportDate : (reportDate || undefined),
       view: params.view ?? view,
+      fromDate: params.fromDate !== undefined ? params.fromDate : fromDate,
+      toDate: params.toDate !== undefined ? params.toDate : toDate,
       focusDay:
         params.focusDay === null || params.focusDay === ""
           ? undefined
@@ -102,6 +145,10 @@ export function CiaStationDetail({
     navigate({ view: "date", focusDay: day || null });
   }
 
+  function setRange(nextFrom: string, nextTo: string) {
+    navigate({ fromDate: nextFrom, toDate: nextTo, focusDay: null });
+  }
+
   return (
     <div className="cia-station-detail">
       <section className="panel cia-period-panel">
@@ -109,18 +156,52 @@ export function CiaStationDetail({
           <div className="cia-period-copy">
             <CalendarDays size={20} aria-hidden />
             <div>
-              <strong>Cash checked from {formatCiaDisplayDate(windowFrom)} to {formatCiaDisplayDate(windowTo)}</strong>
+              <strong>Choose the period you want to check</strong>
               <p className="subtle">
-                Report saved on {formatCiaDisplayDate(reportDate)}
-                {reportSavedAt ? ` · updated ${reportSavedAt}` : ""}
-                {" · "}This covers about one month of ageing cash still with delivery associates.
+                Data is available in this report from {formatCiaDisplayDate(windowFrom)} to {formatCiaDisplayDate(windowTo)}.
+                {" "}You are currently viewing {formatCiaDisplayDate(fromDate)} to {formatCiaDisplayDate(toDate)}.
+                {reportSavedAt ? ` Report updated ${reportSavedAt}.` : ""}
               </p>
             </div>
           </div>
 
           <div className="cia-period-controls">
+            <div className="cia-date-range-fields">
+              <label className="cia-report-date">
+                <span>From date</span>
+                <input
+                  type="date"
+                  className="field"
+                  min={windowFrom}
+                  max={toDate || windowTo}
+                  value={fromDate}
+                  disabled={pending}
+                  onChange={(event) => {
+                    const nextFrom = event.target.value || windowFrom;
+                    const safeTo = toDate < nextFrom ? nextFrom : toDate;
+                    setRange(nextFrom, safeTo);
+                  }}
+                />
+              </label>
+              <label className="cia-report-date">
+                <span>To date</span>
+                <input
+                  type="date"
+                  className="field"
+                  min={fromDate || windowFrom}
+                  max={windowTo}
+                  value={toDate}
+                  disabled={pending}
+                  onChange={(event) => {
+                    const nextTo = event.target.value || windowTo;
+                    const safeFrom = fromDate > nextTo ? nextTo : fromDate;
+                    setRange(safeFrom, nextTo);
+                  }}
+                />
+              </label>
+            </div>
             <label className="cia-report-date">
-              <span>Open report for</span>
+              <span>Open saved report date</span>
               <input
                 type="date"
                 className="field"
@@ -192,7 +273,7 @@ export function CiaStationDetail({
       </section>
 
       {view === "driver" ? (
-        <CiaDriverView stationCode={stationCode} drivers={drivers} />
+        <CiaDriverView stationCode={stationCode} drivers={rangeDrivers} />
       ) : (
         <CiaDateView
           stationCode={stationCode}

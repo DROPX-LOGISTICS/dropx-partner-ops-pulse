@@ -220,6 +220,12 @@
   min-width: 220px;
 }
 
+.cia-date-range-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
 .cia-report-date {
   display: grid;
   gap: 6px;
@@ -746,6 +752,10 @@
   .cia-refresh-actions,
   .cia-row-actions {
     width: 100%;
+  }
+
+  .cia-date-range-fields {
+    grid-template-columns: 1fr;
   }
 
   .cia-refresh-actions .button,
