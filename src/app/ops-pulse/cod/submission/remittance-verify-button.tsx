@@ -6,6 +6,10 @@ type VerifyResponse = {
   verified?: boolean;
   codeFound?: boolean;
   amountMatched?: boolean;
+  depositDateMatched?: boolean;
+  creationPeriodMatched?: boolean;
+  submitterMatched?: boolean;
+  failureReason?: string | null;
   error?: string;
   nearMisses?: { actualAmount?: number }[];
 };
@@ -30,9 +34,17 @@ export function RemittanceVerifyButton() {
             const date = String(data.get("deposit_date") ?? "").trim();
             const remittanceCode = String(data.get("remittance_code") ?? "").trim();
             const amountRaw = String(data.get("deposited_amount") ?? "").trim();
+            const codPeriodFrom = String(data.get("cod_period_from") ?? "").trim();
+            const codPeriodTo = String(data.get("cod_period_to") || data.get("cod_period_from") || "").trim();
+            const submittedBy = String(data.get("submitter_name") ?? "").trim();
             if (!stationCode || !date || !remittanceCode || !amountRaw) {
               setOk(false);
               setMessage("Select a station and fill deposit date, remittance code, and amount before checking.");
+              return;
+            }
+            if (!codPeriodFrom) {
+              setOk(false);
+              setMessage("Fill COD From (and COD To) before checking — they must cover remittance creation date.");
               return;
             }
             startTransition(async () => {
@@ -47,6 +59,9 @@ export function RemittanceVerifyButton() {
                     date,
                     remittanceCode,
                     amount: Number(amountRaw.replace(/,/g, "")),
+                    codPeriodFrom,
+                    codPeriodTo: codPeriodTo || codPeriodFrom,
+                    submittedBy: submittedBy || undefined,
                     fresh: true
                   })
                 });
@@ -58,19 +73,16 @@ export function RemittanceVerifyButton() {
                 }
                 if (payload.verified) {
                   setOk(true);
-                  setMessage("Remittance verified — code, date, and amount match Amazon portal.");
+                  setMessage(
+                    "Remittance verified — deposit date = submissionDate, COD period covers creationDate, amount and submitter match."
+                  );
                   return;
                 }
                 setOk(false);
-                if (!payload.codeFound) {
-                  setMessage("Remittance code not found for this deposit date on Amazon portal.");
-                } else if (!payload.amountMatched) {
-                  const near = payload.nearMisses?.[0]?.actualAmount;
-                  setMessage(
-                    near != null
-                      ? `Code found but amount does not match (portal shows ${near}).`
-                      : "Code found but amount does not match the portal."
-                  );
+                if (payload.failureReason) {
+                  setMessage(payload.failureReason);
+                } else if (!payload.codeFound) {
+                  setMessage("Remittance code not found on Amazon portal for this station.");
                 } else {
                   setMessage("Remittance could not be verified.");
                 }

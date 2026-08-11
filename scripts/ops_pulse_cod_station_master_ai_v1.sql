@@ -80,6 +80,7 @@ create table if not exists public.cod_submissions (
   proof_url text,
   submitter_name text,
   remarks text,
+  source text not null default 'cod_submission',
   status text not null default 'Submitted',
   validation_status text not null default 'Pending'
     check (validation_status in ('Pending', 'Matched', 'Short', 'Excess', 'Rejected')),
@@ -98,6 +99,23 @@ create table if not exists public.cod_submissions (
   updated_at timestamptz not null default now(),
   constraint cod_submissions_company_no_unique unique (company_id, submission_no)
 );
+
+alter table public.cod_submissions
+  add column if not exists source text;
+
+update public.cod_submissions
+set source = 'cod_submission'
+where source is null;
+
+alter table public.cod_submissions
+  alter column source set default 'cod_submission';
+
+do $$
+begin
+  alter table public.cod_submissions alter column source set not null;
+exception
+  when others then null;
+end $$;
 
 create index if not exists cod_submissions_company_period_idx
   on public.cod_submissions(company_id, cod_period_from desc, cod_period_to desc);

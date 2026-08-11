@@ -25,12 +25,18 @@ export async function POST(request: Request) {
       date?: string;
       remittanceCode?: string;
       amount?: number | string;
+      codPeriodFrom?: string;
+      codPeriodTo?: string;
+      submittedBy?: string;
       fresh?: boolean;
     };
 
     const stationCode = String(body.stationCode ?? "").trim().toUpperCase();
     const date = String(body.date ?? "").trim();
     const remittanceCode = String(body.remittanceCode ?? "").trim();
+    const codPeriodFrom = String(body.codPeriodFrom ?? "").trim();
+    const codPeriodTo = String(body.codPeriodTo ?? "").trim();
+    const submittedBy = String(body.submittedBy ?? "").trim();
     const amount = typeof body.amount === "number"
       ? body.amount
       : Number(String(body.amount ?? "").replace(/,/g, "").trim());
@@ -50,6 +56,9 @@ export async function POST(request: Request) {
       date,
       remittanceCode,
       amount,
+      codPeriodFrom: codPeriodFrom || undefined,
+      codPeriodTo: codPeriodTo || undefined,
+      submittedBy: submittedBy || undefined,
       fresh: body.fresh === true
     });
     return NextResponse.json(result);

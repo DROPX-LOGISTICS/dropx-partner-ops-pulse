@@ -401,8 +401,11 @@ export type RemittanceVerifyMatch = {
   status: string;
   actualAmount: number;
   creationDate: number;
+  creationDateIst: string | null;
   submissionDate: number | null;
-  matchedOn?: "creation_date" | "submission_date" | "lookback";
+  submissionDateIst: string | null;
+  submittedBy: string | null;
+  createdBy: string | null;
 };
 
 export type RemittanceVerifyResult = {
@@ -414,6 +417,10 @@ export type RemittanceVerifyResult = {
   verified: boolean;
   codeFound: boolean;
   amountMatched: boolean;
+  depositDateMatched: boolean;
+  creationPeriodMatched: boolean;
+  submitterMatched: boolean;
+  failureReason: string | null;
   matches: RemittanceVerifyMatch[];
   nearMisses: RemittanceVerifyMatch[];
   sessionSource: string | null;
@@ -430,6 +437,10 @@ type RawRemittanceVerify = {
   verified?: boolean;
   codeFound?: boolean;
   amountMatched?: boolean;
+  depositDateMatched?: boolean;
+  creationPeriodMatched?: boolean;
+  submitterMatched?: boolean;
+  failureReason?: string | null;
   matches?: Array<RemittanceVerifyMatch & Record<string, unknown>>;
   nearMisses?: Array<RemittanceVerifyMatch & Record<string, unknown>>;
   sessionSource?: string | null;
@@ -438,15 +449,18 @@ type RawRemittanceVerify = {
 };
 
 /**
- * Dedicated verify endpoint — uses the full Amazon remittance lookback list
- * (not only same-day creationDate rows from the ER remittance summary).
- * Needed when deposit date matches submissionDate but creation was prior day.
+ * Dedicated verify endpoint — full Amazon remittance lookback.
+ * Rules (IST): deposit date = submissionDate; COD From/To covers creationDate;
+ * amount = actualAmount.value; submittedBy optional case-insensitive.
  */
 export async function verifyRemittance(params: {
   stationCode: string;
   date: string;
   remittanceCode: string;
   amount: number;
+  codPeriodFrom?: string;
+  codPeriodTo?: string;
+  submittedBy?: string | null;
   fresh?: boolean;
 }): Promise<RemittanceVerifyResult> {
   const raw = await postWorker<RawRemittanceVerify>("/api/admin/executive/remittance/verify", {
@@ -454,6 +468,9 @@ export async function verifyRemittance(params: {
     date: params.date,
     remittanceCode: params.remittanceCode,
     amount: params.amount,
+    codPeriodFrom: params.codPeriodFrom || undefined,
+    codPeriodTo: params.codPeriodTo || undefined,
+    submittedBy: params.submittedBy || undefined,
     fresh: params.fresh === true
   });
 
@@ -463,11 +480,11 @@ export async function verifyRemittance(params: {
     status: String(row.status ?? ""),
     actualAmount: moneyValue(row.actualAmount as never),
     creationDate: Number(row.creationDate ?? 0) || 0,
+    creationDateIst: row.creationDateIst == null ? null : String(row.creationDateIst),
     submissionDate: row.submissionDate == null ? null : Number(row.submissionDate) || null,
-    matchedOn:
-      row.matchedOn === "creation_date" || row.matchedOn === "submission_date" || row.matchedOn === "lookback"
-        ? row.matchedOn
-        : undefined
+    submissionDateIst: row.submissionDateIst == null ? null : String(row.submissionDateIst),
+    submittedBy: row.submittedBy == null ? null : String(row.submittedBy),
+    createdBy: row.createdBy == null ? null : String(row.createdBy)
   });
 
   return {
@@ -479,6 +496,10 @@ export async function verifyRemittance(params: {
     verified: Boolean(raw.verified),
     codeFound: Boolean(raw.codeFound),
     amountMatched: Boolean(raw.amountMatched),
+    depositDateMatched: Boolean(raw.depositDateMatched),
+    creationPeriodMatched: Boolean(raw.creationPeriodMatched),
+    submitterMatched: raw.submitterMatched !== false,
+    failureReason: raw.failureReason == null ? null : String(raw.failureReason),
     matches: Array.isArray(raw.matches) ? raw.matches.map(mapMatch) : [],
     nearMisses: Array.isArray(raw.nearMisses) ? raw.nearMisses.map(mapMatch) : [],
     sessionSource: raw.sessionSource == null ? null : String(raw.sessionSource),

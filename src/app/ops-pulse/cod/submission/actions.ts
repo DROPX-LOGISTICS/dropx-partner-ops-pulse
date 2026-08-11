@@ -31,6 +31,9 @@ export type CodSubmissionActionState = {
   submissionId?: string;
 };
 
+/** Production DB requires NOT NULL `source` on cod_submissions. */
+const COD_SUBMISSION_SOURCE = "cod_submission";
+
 function resolveFormType(station: CodLocationRow, clientHint: string): CodFormType | "" {
   const inferred = inferFormTypeFromLocation(station);
   if (inferred) return inferred;
@@ -54,28 +57,37 @@ async function stationDetails(companyId: string, locationId: string) {
 async function verifyAmazonRemittance(params: {
   stationCode: string;
   depositDate: string;
+  codPeriodFrom: string;
+  codPeriodTo: string;
   remittanceCode: string;
   amount: number;
+  submittedBy: string | null;
 }) {
   if (!isCashReconWorkerConfigured()) {
     throw new Error(
       "Cash recon worker is not configured. Set CASH_RECON_WORKER_URL and CASH_RECON_ADMIN_KEY."
     );
   }
-  // Dedicated remittance/verify endpoint (full lookback list). Needed when
-  // deposit date matches submissionDate but remittance was created prior day.
   const verify = await verifyRemittance({
     stationCode: params.stationCode,
     date: params.depositDate,
     remittanceCode: params.remittanceCode,
     amount: params.amount,
+    codPeriodFrom: params.codPeriodFrom,
+    codPeriodTo: params.codPeriodTo,
+    submittedBy: params.submittedBy,
     fresh: true
   });
+  const match = verify.matches[0] ?? null;
   const validationPayload = {
     remittance_verify: {
       verified: verify.verified,
       codeFound: verify.codeFound,
       amountMatched: verify.amountMatched,
+      depositDateMatched: verify.depositDateMatched,
+      creationPeriodMatched: verify.creationPeriodMatched,
+      submitterMatched: verify.submitterMatched,
+      failureReason: verify.failureReason,
       remittanceCode: verify.remittanceCode,
       amount: verify.amount,
       matches: verify.matches,
@@ -85,19 +97,18 @@ async function verifyAmazonRemittance(params: {
     }
   };
   if (!verify.verified) {
-    if (!verify.codeFound) {
-      throw new Error(
-        `Remittance code ${params.remittanceCode} was not found on Amazon portal around ${params.depositDate}. Check the code, station, and deposit date (creation or submission day).`
-      );
-    }
-    const near = verify.nearMisses[0]?.actualAmount;
     throw new Error(
-      near != null
-        ? `Remittance code found but amount does not match (portal shows ${near}, you entered ${params.amount}). Use the slip / actual amount.`
-        : `Remittance code found but amount does not match the portal for ${params.depositDate}.`
+      verify.failureReason ||
+        (!verify.codeFound
+          ? `Remittance code ${params.remittanceCode} was not found on Amazon portal.`
+          : `Remittance code found but details do not match for deposit ${params.depositDate}.`)
     );
   }
-  return validationPayload;
+  return {
+    validationPayload,
+    remittanceCreationDate: match?.creationDateIst ?? null,
+    remittanceSubmissionDate: match?.submissionDateIst ?? null
+  };
 }
 
 function revalidateCodPaths() {
@@ -136,16 +147,24 @@ export async function createCodSubmission(
     let validationPayload: Record<string, unknown> | null = null;
     let validatedAmount: number | null = null;
     let validatedAt: string | null = null;
+    let remittanceCreationDate: string | null = null;
+    let remittanceSubmissionDate: string | null = null;
 
     if (formType === "amazon") {
       const stationCode = String(station.station_code ?? "").trim().toUpperCase();
       if (!stationCode) throw new Error("Selected station is missing a station code.");
-      validationPayload = await verifyAmazonRemittance({
+      const verified = await verifyAmazonRemittance({
         stationCode,
         depositDate,
+        codPeriodFrom,
+        codPeriodTo,
         remittanceCode,
-        amount
+        amount,
+        submittedBy: submitterName
       });
+      validationPayload = verified.validationPayload;
+      remittanceCreationDate = verified.remittanceCreationDate;
+      remittanceSubmissionDate = verified.remittanceSubmissionDate;
       validationStatus = "Matched";
       validatedAmount = amount;
       validatedAt = new Date().toISOString();
@@ -193,6 +212,9 @@ export async function createCodSubmission(
           remarks,
           remittance_amount: amount,
           remittance_code: remittanceCode,
+          remittance_creation_date: remittanceCreationDate,
+          remittance_submission_date: remittanceSubmissionDate,
+          source: COD_SUBMISSION_SOURCE,
           station_code: station.station_code,
           status: "Submitted",
           submission_no: `COD-${Date.now().toString(36).toUpperCase()}`,
@@ -215,7 +237,7 @@ export async function createCodSubmission(
       submissionId,
       notice:
         formType === "amazon"
-          ? "COD submission saved — remittance verified (code, amount, deposit date)."
+          ? "COD submission saved — remittance verified (deposit = submissionDate, COD period = creationDate, amount, submitter)."
           : "COD submission saved with deposit slip."
     };
   } catch (error) {
@@ -274,16 +296,24 @@ export async function updateCodSubmission(
     let validationPayload: Record<string, unknown> | null = null;
     let validatedAmount: number | null = null;
     let validatedAt: string | null = null;
+    let remittanceCreationDate: string | null = null;
+    let remittanceSubmissionDate: string | null = null;
 
     if (formType === "amazon") {
       const stationCode = String(station.station_code ?? "").trim().toUpperCase();
       if (!stationCode) throw new Error("Selected station is missing a station code.");
-      validationPayload = await verifyAmazonRemittance({
+      const verified = await verifyAmazonRemittance({
         stationCode,
         depositDate,
+        codPeriodFrom,
+        codPeriodTo,
         remittanceCode,
-        amount
+        amount,
+        submittedBy: submitterName
       });
+      validationPayload = verified.validationPayload;
+      remittanceCreationDate = verified.remittanceCreationDate;
+      remittanceSubmissionDate = verified.remittanceSubmissionDate;
       validationStatus = "Matched";
       validatedAmount = amount;
       validatedAt = new Date().toISOString();
@@ -334,6 +364,9 @@ export async function updateCodSubmission(
         remarks,
         remittance_amount: amount,
         remittance_code: remittanceCode,
+        remittance_creation_date: remittanceCreationDate,
+        remittance_submission_date: remittanceSubmissionDate,
+        source: COD_SUBMISSION_SOURCE,
         station_code: station.station_code,
         submitter_name: submitterName,
         validation_status: validationStatus,
