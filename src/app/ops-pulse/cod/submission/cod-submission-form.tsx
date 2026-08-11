@@ -92,7 +92,7 @@ export function CodSubmissionForm({
       </label>
       {isAmazon ? <RemittanceVerifyButton /> : null}
       <div className="form-actions span-3 align-right">
-        <SubmitButton disabled={!canAdd}>
+        <SubmitButton disabled={!canAdd} pendingText={isAmazon ? "Verifying remittance…" : "Saving…"}>
           {isAmazon ? "Verify & submit COD" : "Submit COD"}
         </SubmitButton>
       </div>

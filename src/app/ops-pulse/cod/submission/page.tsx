@@ -32,6 +32,8 @@ type SearchParams = {
   status?: string;
   to?: string;
   deposit_date?: string;
+  flash_error?: string;
+  flash_notice?: string;
 };
 
 function todayKolkata() {
@@ -43,15 +45,20 @@ function todayKolkata() {
   }).format(new Date());
 }
 
-function loadFlash() {
+function loadFlash(searchParams?: SearchParams) {
+  // URL flash is reliable after server-action redirects (cookie clear during RSC can crash).
+  const fromUrlError = typeof searchParams?.flash_error === "string" ? searchParams.flash_error.trim() : "";
+  const fromUrlNotice = typeof searchParams?.flash_notice === "string" ? searchParams.flash_notice.trim() : "";
+  if (fromUrlError || fromUrlNotice) {
+    return {
+      error: fromUrlError || null,
+      notice: fromUrlNotice || null
+    };
+  }
+
   const jar = cookies() as unknown as UnsafeUnwrappedCookies;
   const raw = jar.get("dropx_cod_submission_flash")?.value;
   if (!raw) return { error: null as string | null, notice: null as string | null };
-  try {
-    jar.set("dropx_cod_submission_flash", "", { httpOnly: true, maxAge: 0, path: "/", sameSite: "lax" });
-  } catch {
-    /* ignore clear failures in RSC */
-  }
   try {
     const parsed = JSON.parse(raw) as { error?: unknown; notice?: unknown };
     return {
@@ -64,13 +71,14 @@ function loadFlash() {
 }
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 120;
 
 export default async function CodSubmissionPage(props: { searchParams?: Promise<SearchParams> }) {
   const searchParams = await props.searchParams;
   const authorization = await requirePagePermission("cod_submission", "access");
   const companyId = requireCompanyId(authorization);
   const permission = authorization.permissions.cod_submission;
-  const flash = loadFlash();
+  const flash = loadFlash(searchParams);
   const today = todayKolkata();
   const selectedClient = searchParams?.client === "amazon" || searchParams?.client === "flipkart" ? searchParams.client : "";
   const [{ locations, error: locationsError }, submissionsResult] = await Promise.all([
@@ -182,7 +190,7 @@ export default async function CodSubmissionPage(props: { searchParams?: Promise<
 
           <section className="panel">
             <div className="panel-body">
-              <form action="/ops-pulse/cod/submission" className="form-grid four">
+              <form action="/cod/submission" className="form-grid four">
                 <label>From<input className="field" name="from" type="date" defaultValue={searchParams?.from ?? ""} /></label>
                 <label>To<input className="field" name="to" type="date" defaultValue={searchParams?.to ?? ""} /></label>
                 <label>Station
