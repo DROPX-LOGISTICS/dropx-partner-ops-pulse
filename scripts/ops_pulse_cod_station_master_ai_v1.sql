@@ -88,12 +88,14 @@ create table if not exists public.cod_submissions (
   validated_at timestamptz,
   validated_by uuid references auth.users(id) on delete set null,
   validation_remarks text,
+  form_payload jsonb not null default '{}'::jsonb,
   validation_payload jsonb not null default '{}'::jsonb,
   attachments jsonb not null default '[]'::jsonb,
   deposit_slip_attachments jsonb not null default '[]'::jsonb,
-  ai_status text,
+  ai_status text not null default 'Not queued',
   ai_confidence numeric(5,2),
   ai_summary text,
+  ai_result jsonb not null default '{}'::jsonb,
   created_by uuid references auth.users(id) on delete set null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
@@ -101,18 +103,40 @@ create table if not exists public.cod_submissions (
 );
 
 alter table public.cod_submissions
-  add column if not exists source text;
+  add column if not exists source text,
+  add column if not exists form_payload jsonb,
+  add column if not exists ai_result jsonb;
 
 update public.cod_submissions
-set source = 'cod_submission'
-where source is null;
+set
+  source = coalesce(nullif(source, ''), 'cod_submission'),
+  form_payload = coalesce(form_payload, '{}'::jsonb),
+  ai_result = coalesce(ai_result, '{}'::jsonb),
+  validation_payload = coalesce(validation_payload, '{}'::jsonb),
+  attachments = coalesce(attachments, '[]'::jsonb),
+  deposit_slip_attachments = coalesce(deposit_slip_attachments, '[]'::jsonb),
+  created_at = coalesce(created_at, now()),
+  updated_at = coalesce(updated_at, now())
+where
+  source is null
+  or form_payload is null
+  or ai_result is null
+  or validation_payload is null
+  or attachments is null
+  or deposit_slip_attachments is null
+  or created_at is null
+  or updated_at is null;
 
 alter table public.cod_submissions
-  alter column source set default 'cod_submission';
+  alter column source set default 'cod_submission',
+  alter column form_payload set default '{}'::jsonb,
+  alter column ai_result set default '{}'::jsonb;
 
 do $$
 begin
   alter table public.cod_submissions alter column source set not null;
+  alter table public.cod_submissions alter column form_payload set not null;
+  alter table public.cod_submissions alter column ai_result set not null;
 exception
   when others then null;
 end $$;

@@ -72,12 +72,14 @@ export type CodSubmissionRow = {
   validated_amount: number | string | null;
   validated_at: string | null;
   validation_remarks: string | null;
+  form_payload?: Record<string, unknown> | null;
   validation_payload: Record<string, unknown> | null;
   attachments: CodAttachment[] | null;
   deposit_slip_attachments?: CodAttachment[] | null;
   ai_status?: string | null;
   ai_confidence?: number | string | null;
   ai_summary?: string | null;
+  ai_result?: Record<string, unknown> | null;
   created_at: string;
   stations?: CodLocationRow | CodLocationRow[] | null;
 };

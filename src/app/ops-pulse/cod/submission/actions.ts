@@ -31,8 +31,35 @@ export type CodSubmissionActionState = {
   submissionId?: string;
 };
 
-/** Production DB requires NOT NULL `source` on cod_submissions. */
+/** Production NOT NULL columns without reliable defaults (OpenAPI required). */
 const COD_SUBMISSION_SOURCE = "cod_submission";
+const EMPTY_JSON = {} as Record<string, unknown>;
+
+function buildFormPayload(fields: {
+  formType: string;
+  stationCode: string | null | undefined;
+  locationId: string;
+  remittanceCode: string;
+  submitterName: string | null;
+  amount: number;
+  depositDate: string;
+  codPeriodFrom: string;
+  codPeriodTo: string;
+  remarks: string | null;
+}) {
+  return {
+    form_type: fields.formType || null,
+    station_code: fields.stationCode ?? null,
+    location_id: fields.locationId,
+    remittance_code: fields.remittanceCode,
+    submitter_name: fields.submitterName,
+    deposited_amount: fields.amount,
+    deposit_date: fields.depositDate,
+    cod_period_from: fields.codPeriodFrom,
+    cod_period_to: fields.codPeriodTo,
+    remarks: fields.remarks
+  };
+}
 
 function resolveFormType(station: CodLocationRow, clientHint: string): CodFormType | "" {
   const inferred = inferFormTypeFromLocation(station);
@@ -192,10 +219,25 @@ export async function createCodSubmission(
     }
 
     const nowIso = new Date().toISOString();
+    const formPayload = buildFormPayload({
+      formType,
+      stationCode: station.station_code,
+      locationId,
+      remittanceCode,
+      submitterName,
+      amount,
+      depositDate,
+      codPeriodFrom,
+      codPeriodTo,
+      remarks
+    });
     const { error } = await supabaseAdmin.from("cod_submissions").insert(
       withCompany(
         {
           id: submissionId,
+          ai_result: EMPTY_JSON,
+          ai_status: "Not queued",
+          ai_summary: null,
           attachments: depositAttachments,
           client: formType ? clientForFormType(formType) : null,
           cod_amount: amount,
@@ -207,6 +249,7 @@ export async function createCodSubmission(
           deposit_date: depositDate,
           deposit_slip_attachments: depositAttachments,
           deposited_amount: amount,
+          form_payload: formPayload,
           form_type: formType || null,
           location_id: locationId,
           payment_mode: "CMS / Bank",
@@ -225,9 +268,7 @@ export async function createCodSubmission(
           validation_status: validationStatus,
           validated_amount: validatedAmount,
           validated_at: validatedAt,
-          validation_payload: validationPayload ?? {},
-          ai_status: "Not queued",
-          ai_summary: null
+          validation_payload: validationPayload ?? EMPTY_JSON
         },
         companyId
       )
@@ -349,6 +390,19 @@ export async function updateCodSubmission(
       throw new Error("Upload a photo of the deposit slip (JPG or PNG).");
     }
 
+    const formPayload = buildFormPayload({
+      formType,
+      stationCode: station.station_code,
+      locationId,
+      remittanceCode,
+      submitterName,
+      amount,
+      depositDate,
+      codPeriodFrom,
+      codPeriodTo,
+      remarks
+    });
+
     const { error } = await supabaseAdmin
       .from("cod_submissions")
       .update({
@@ -361,6 +415,7 @@ export async function updateCodSubmission(
         deposit_date: depositDate,
         deposit_slip_attachments: depositAttachments,
         deposited_amount: amount,
+        form_payload: formPayload,
         form_type: formType || null,
         location_id: locationId,
         reference_no: remittanceCode,
@@ -375,7 +430,7 @@ export async function updateCodSubmission(
         validation_status: validationStatus,
         validated_amount: validatedAmount,
         validated_at: validatedAt,
-        validation_payload: validationPayload ?? {},
+        validation_payload: validationPayload ?? EMPTY_JSON,
         updated_at: new Date().toISOString()
       })
       .eq("company_id", companyId)
