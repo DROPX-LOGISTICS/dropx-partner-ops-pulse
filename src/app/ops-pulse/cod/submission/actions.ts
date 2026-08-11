@@ -191,6 +191,7 @@ export async function createCodSubmission(
       throw new Error("Upload a photo of the deposit slip (JPG or PNG).");
     }
 
+    const nowIso = new Date().toISOString();
     const { error } = await supabaseAdmin.from("cod_submissions").insert(
       withCompany(
         {
@@ -201,6 +202,7 @@ export async function createCodSubmission(
           cod_date: codPeriodFrom,
           cod_period_from: codPeriodFrom,
           cod_period_to: codPeriodTo,
+          created_at: nowIso,
           created_by: authorization.userId,
           deposit_date: depositDate,
           deposit_slip_attachments: depositAttachments,
@@ -219,10 +221,11 @@ export async function createCodSubmission(
           status: "Submitted",
           submission_no: `COD-${Date.now().toString(36).toUpperCase()}`,
           submitter_name: submitterName,
+          updated_at: nowIso,
           validation_status: validationStatus,
           validated_amount: validatedAmount,
           validated_at: validatedAt,
-          validation_payload: validationPayload,
+          validation_payload: validationPayload ?? {},
           ai_status: "Not queued",
           ai_summary: null
         },
@@ -372,7 +375,7 @@ export async function updateCodSubmission(
         validation_status: validationStatus,
         validated_amount: validatedAmount,
         validated_at: validatedAt,
-        validation_payload: validationPayload,
+        validation_payload: validationPayload ?? {},
         updated_at: new Date().toISOString()
       })
       .eq("company_id", companyId)
