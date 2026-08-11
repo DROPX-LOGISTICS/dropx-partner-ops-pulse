@@ -1,4 +1,3 @@
-import { AppShell } from "@/components/app-shell";
 import { CodSectionTabs } from "@/components/cod-section-tabs";
 import { PageHead } from "@/components/page-head";
 import { requirePagePermission } from "@/lib/authorization";
@@ -29,7 +28,7 @@ export default async function CashInAssociateNetworkPage() {
   const stationsWithPending = payload?.stations.filter((s) => s.pendingLiability > 0).length ?? 0;
 
   return (
-    <AppShell active="COD" pageCode="cod_executive_reconciliation">
+    <>
       <PageHead
         eyebrow="Ops Pulse · Manager analysis"
         title="Cash In Associate"
@@ -41,8 +40,7 @@ export default async function CashInAssociateNetworkPage() {
         }
       />
       <CodSectionTabs active="cash-in-associate" />
-
-      {error ? (
+{error ? (
         <section className="panel message-panel error">
           <div className="panel-body">
             <strong>Unable to load Cash In Associate</strong>
@@ -110,6 +108,6 @@ export default async function CashInAssociateNetworkPage() {
           />
         </>
       ) : null}
-    </AppShell>
+    </>
   );
 }

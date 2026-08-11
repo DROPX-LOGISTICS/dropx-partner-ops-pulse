@@ -1,11 +1,12 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useActionState, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { SearchableSelect } from "@/components/searchable-select";
 import { StatusPill } from "@/components/status-pill";
 import { SubmitButton } from "@/components/submit-button";
 import { RemittanceVerifyButton } from "./remittance-verify-button";
-import { updateCodSubmission } from "./actions";
+import { updateCodSubmission, type CodSubmissionActionState } from "./actions";
 
 export type CodRegisterStationOption = {
   value: string;
@@ -38,7 +39,130 @@ export type CodRegisterRow = {
   slipUrl: string | null;
 };
 
-const ALPHA_PATTERN = "[A-Za-z0-9][A-Za-z0-9 ._/-]*";
+const initialEditState: CodSubmissionActionState = { ok: false };
+
+function EditSubmissionModal({
+  client,
+  editing,
+  onClose,
+  stationOptions
+}: {
+  client: string;
+  editing: CodRegisterRow;
+  onClose: () => void;
+  stationOptions: CodRegisterStationOption[];
+}) {
+  const router = useRouter();
+  const [locationId, setLocationId] = useState(editing.locationId);
+  const [state, formAction, pending] = useActionState(updateCodSubmission, initialEditState);
+  const selected = useMemo(
+    () => stationOptions.find((option) => option.value === locationId) ?? null,
+    [locationId, stationOptions]
+  );
+  const isAmazon = selected?.formType === "amazon" || editing.formType === "amazon" || client === "amazon";
+
+  useEffect(() => {
+    if (state?.ok) {
+      router.refresh();
+      onClose();
+    }
+  }, [state, router, onClose]);
+
+  return (
+    <div className="modal-backdrop" role="presentation" onClick={pending ? undefined : onClose}>
+      <section
+        className="modal-panel wide"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Edit COD submission"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="panel-head toolbar">
+          <div>
+            <h2>Edit COD submission</h2>
+            <p className="subtle">Update details and optionally replace the deposit slip photo. Amazon rows are re-verified on save.</p>
+          </div>
+          <button type="button" className="modal-close" aria-label="Close" onClick={onClose} disabled={pending}>×</button>
+        </div>
+        <div className="panel-body" style={{ position: "relative" }}>
+          {pending ? (
+            <div className="cod-submit-overlay" aria-live="polite">
+              <div className="cod-submit-overlay-card">
+                <span className="page-spinner" aria-hidden="true" />
+                <strong>{isAmazon ? "Verifying remittance & saving…" : "Saving changes…"}</strong>
+              </div>
+            </div>
+          ) : null}
+          {state?.error ? (
+            <section className="panel message-panel error" style={{ marginBottom: 12 }}>
+              <div className="panel-body"><strong>Action required</strong><p className="subtle" style={{ marginTop: 6 }}>{state.error}</p></div>
+            </section>
+          ) : null}
+          <form action={formAction} className="form-grid three" encType="multipart/form-data">
+            <input type="hidden" name="submission_id" value={editing.id} />
+            {client ? <input type="hidden" name="client" value={client} /> : null}
+            <input type="hidden" name="station_code" value={selected?.stationCode || editing.stationCode} />
+            <label className="span-2">Station
+              <SearchableSelect
+                name="location_id"
+                options={stationOptions}
+                defaultValue={editing.locationId}
+                placeholder="Select station"
+                required
+                onValueChange={setLocationId}
+                disabled={pending}
+              />
+            </label>
+            <label>Deposit Date
+              <input className="field" name="deposit_date" type="date" defaultValue={editing.depositDate} required disabled={pending} />
+            </label>
+            <label>COD From
+              <input className="field" name="cod_period_from" type="date" defaultValue={editing.codPeriodFrom || editing.depositDate} required disabled={pending} />
+            </label>
+            <label>COD To
+              <input className="field" name="cod_period_to" type="date" defaultValue={editing.codPeriodTo || editing.depositDate} required disabled={pending} />
+            </label>
+            <label>Deposited Amount
+              <input className="field" name="deposited_amount" inputMode="decimal" defaultValue={editing.amountRaw} required disabled={pending} />
+            </label>
+            <label>Remittance Code
+              <input className="field" name="remittance_code" defaultValue={editing.remittanceCode} required title="Alphanumeric remittance / CMS code" disabled={pending} />
+            </label>
+            <label>Submitted By
+              <input className="field" name="submitter_name" defaultValue={editing.submitterName} title="Letters and numbers only" disabled={pending} />
+            </label>
+            <label className="span-2">Replace deposit slip photo
+              <input className="field" name="deposit_slip" type="file" accept="image/*" capture="environment" disabled={pending} />
+              <span className="subtle" style={{ display: "block", marginTop: 6 }}>
+                Leave empty to keep the current slip. Upload JPG/PNG only if replacing.
+              </span>
+            </label>
+            {editing.hasSlip && editing.slipUrl ? (
+              <div className="span-1" style={{ alignSelf: "end" }}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  alt="Current slip"
+                  src={editing.slipUrl}
+                  style={{ width: "100%", maxHeight: 120, objectFit: "cover", borderRadius: 8, border: "1px solid var(--border, #ddd)" }}
+                />
+              </div>
+            ) : null}
+            <label className="span-3">Remarks
+              <textarea className="field" name="remarks" defaultValue={editing.remarks} rows={3} disabled={pending} />
+            </label>
+            {isAmazon ? <RemittanceVerifyButton /> : null}
+            <div className="form-actions span-3 align-right" style={{ gap: 10 }}>
+              <button type="button" className="button secondary" onClick={onClose} disabled={pending}>Cancel</button>
+              <SubmitButton disabled={pending} pendingText={isAmazon ? "Verifying…" : "Saving…"}>
+                {isAmazon ? "Verify & save" : "Save changes"}
+              </SubmitButton>
+            </div>
+          </form>
+        </div>
+      </section>
+    </div>
+  );
+}
 
 export function CodSubmissionRegister({
   canEdit,
@@ -53,23 +177,6 @@ export function CodSubmissionRegister({
 }) {
   const [editing, setEditing] = useState<CodRegisterRow | null>(null);
   const [preview, setPreview] = useState<CodRegisterRow | null>(null);
-  const [locationId, setLocationId] = useState("");
-
-  const selected = useMemo(
-    () => stationOptions.find((option) => option.value === locationId) ?? null,
-    [locationId, stationOptions]
-  );
-  const isAmazon = selected?.formType === "amazon" || editing?.formType === "amazon" || client === "amazon";
-
-  function openEdit(row: CodRegisterRow) {
-    setEditing(row);
-    setLocationId(row.locationId);
-  }
-
-  function closeEdit() {
-    setEditing(null);
-    setLocationId("");
-  }
 
   return (
     <>
@@ -133,7 +240,7 @@ export function CodSubmissionRegister({
                 <td>{row.remarks || "-"}</td>
                 <td>
                   {canEdit ? (
-                    <button type="button" className="button secondary" style={{ padding: "4px 10px", minHeight: 0 }} onClick={() => openEdit(row)}>
+                    <button type="button" className="button secondary" style={{ padding: "4px 10px", minHeight: 0 }} onClick={() => setEditing(row)}>
                       Edit
                     </button>
                   ) : (
@@ -160,7 +267,7 @@ export function CodSubmissionRegister({
             <div className="panel-head toolbar">
               <div>
                 <h2>Deposit slip</h2>
-                <p className="subtle">{preview.stationLabel} · {preview.depositDate} · {preview.remittanceCode}</p>
+                <p className="subtle">{preview.stationLabel} · {preview.depositDateLabel} · {preview.remittanceCode}</p>
               </div>
               <button type="button" className="modal-close" aria-label="Close" onClick={() => setPreview(null)}>×</button>
             </div>
@@ -185,95 +292,12 @@ export function CodSubmissionRegister({
       ) : null}
 
       {editing ? (
-        <div className="modal-backdrop" role="presentation" onClick={closeEdit}>
-          <section
-            className="modal-panel wide"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Edit COD submission"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="panel-head toolbar">
-              <div>
-                <h2>Edit COD submission</h2>
-                <p className="subtle">Update details and optionally replace the deposit slip photo. Amazon rows are re-verified on save.</p>
-              </div>
-              <button type="button" className="modal-close" aria-label="Close" onClick={closeEdit}>×</button>
-            </div>
-            <div className="panel-body">
-              <form action={updateCodSubmission} className="form-grid three" encType="multipart/form-data">
-                <input type="hidden" name="submission_id" value={editing.id} />
-                {client ? <input type="hidden" name="client" value={client} /> : null}
-                <input type="hidden" name="station_code" value={selected?.stationCode || editing.stationCode} />
-                <label className="span-2">Station
-                  <SearchableSelect
-                    name="location_id"
-                    options={stationOptions}
-                    defaultValue={editing.locationId}
-                    placeholder="Select station"
-                    required
-                    onValueChange={setLocationId}
-                  />
-                </label>
-                <label>Deposit Date
-                  <input className="field" name="deposit_date" type="date" defaultValue={editing.depositDate} required />
-                </label>
-                <label>COD From
-                  <input className="field" name="cod_period_from" type="date" defaultValue={editing.codPeriodFrom || editing.depositDate} required />
-                </label>
-                <label>COD To
-                  <input className="field" name="cod_period_to" type="date" defaultValue={editing.codPeriodTo || editing.depositDate} required />
-                </label>
-                <label>Deposited Amount
-                  <input className="field" name="deposited_amount" inputMode="decimal" defaultValue={editing.amountRaw} required pattern="[0-9,.]+" />
-                </label>
-                <label>Remittance Code
-                  <input
-                    className="field"
-                    name="remittance_code"
-                    defaultValue={editing.remittanceCode}
-                    required
-                    pattern={ALPHA_PATTERN}
-                    title="Alphanumeric remittance / CMS code"
-                  />
-                </label>
-                <label>Submitted By
-                  <input
-                    className="field"
-                    name="submitter_name"
-                    defaultValue={editing.submitterName}
-                    pattern={ALPHA_PATTERN}
-                    title="Letters and numbers only"
-                  />
-                </label>
-                <label className="span-2">Replace deposit slip photo
-                  <input className="field" name="deposit_slip" type="file" accept="image/*" capture="environment" />
-                  <span className="subtle" style={{ display: "block", marginTop: 6 }}>
-                    Leave empty to keep the current slip. Upload JPG/PNG only if replacing.
-                  </span>
-                </label>
-                {editing.hasSlip && editing.slipUrl ? (
-                  <div className="span-1" style={{ alignSelf: "end" }}>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      alt="Current slip"
-                      src={editing.slipUrl}
-                      style={{ width: "100%", maxHeight: 120, objectFit: "cover", borderRadius: 8, border: "1px solid var(--border, #ddd)" }}
-                    />
-                  </div>
-                ) : null}
-                <label className="span-3">Remarks
-                  <textarea className="field" name="remarks" defaultValue={editing.remarks} rows={3} />
-                </label>
-                {isAmazon ? <RemittanceVerifyButton /> : null}
-                <div className="form-actions span-3 align-right" style={{ gap: 10 }}>
-                  <button type="button" className="button secondary" onClick={closeEdit}>Cancel</button>
-                  <SubmitButton>{isAmazon ? "Verify & save" : "Save changes"}</SubmitButton>
-                </div>
-              </form>
-            </div>
-          </section>
-        </div>
+        <EditSubmissionModal
+          client={client}
+          editing={editing}
+          onClose={() => setEditing(null)}
+          stationOptions={stationOptions}
+        />
       ) : null}
     </>
   );

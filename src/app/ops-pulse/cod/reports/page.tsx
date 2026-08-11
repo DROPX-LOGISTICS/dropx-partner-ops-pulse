@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { AppShell } from "@/components/app-shell";
 import { CodSectionTabs } from "@/components/cod-section-tabs";
 import { PageHead } from "@/components/page-head";
 import { StatusPill } from "@/components/status-pill";
@@ -267,7 +266,7 @@ export default async function CodReportsPage(props: { searchParams?: Promise<Sea
   const varianceTotal = deposited - erCollectedTotal;
 
   return (
-    <AppShell active="COD" pageCode="cod_reports">
+    <>
       <PageHead
         eyebrow="Ops Pulse"
         title="COD Reports"
@@ -275,8 +274,7 @@ export default async function CodReportsPage(props: { searchParams?: Promise<Sea
         action={<span className={`status-pill ${isSupabaseAdminConfigured ? "good" : "warn"}`}>{isSupabaseAdminConfigured ? "Database connected" : "Database key missing"}</span>}
       />
       <CodSectionTabs active="reports" />
-
-      {setupError ? (
+{setupError ? (
         <section className="panel message-panel error">
           <div className="panel-body"><strong>Database setup needed</strong><p className="subtle" style={{ marginTop: 6 }}>{codSetupMessage(setupError)}</p></div>
         </section>
@@ -492,6 +490,6 @@ export default async function CodReportsPage(props: { searchParams?: Promise<Sea
           </section>
         </>
       ) : null}
-    </AppShell>
+    </>
   );
 }

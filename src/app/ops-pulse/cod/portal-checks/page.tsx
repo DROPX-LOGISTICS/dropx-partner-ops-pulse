@@ -1,5 +1,4 @@
 import { cookies, type UnsafeUnwrappedCookies } from "next/headers";
-import { AppShell } from "@/components/app-shell";
 import { CodSectionTabs } from "@/components/cod-section-tabs";
 import { PageHead } from "@/components/page-head";
 import { StatusPill } from "@/components/status-pill";
@@ -124,7 +123,7 @@ export default async function PortalChecksPage(props: { searchParams?: Promise<S
   const worker = workerLinks();
 
   return (
-    <AppShell active="COD" pageCode="cod_portal_checks">
+    <>
       <PageHead
         eyebrow="Ops Pulse"
         title="COD Portal Checks"
@@ -132,8 +131,7 @@ export default async function PortalChecksPage(props: { searchParams?: Promise<S
         action={<span className={`status-pill ${isSupabaseAdminConfigured ? "good" : "warn"}`}>{isSupabaseAdminConfigured ? "Database connected" : "Database key missing"}</span>}
       />
       <CodSectionTabs active="portal-checks" />
-
-      {setupError ? (
+{setupError ? (
         <section className="panel message-panel error">
           <div className="panel-body"><strong>Database setup needed</strong><p className="subtle" style={{ marginTop: 6 }}>{codSetupMessage(setupError)}</p></div>
         </section>
@@ -281,6 +279,6 @@ export default async function PortalChecksPage(props: { searchParams?: Promise<S
           </section>
         </>
       ) : null}
-    </AppShell>
+    </>
   );
 }

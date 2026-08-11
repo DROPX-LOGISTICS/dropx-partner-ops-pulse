@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { AppShell } from "@/components/app-shell";
 import { CodSectionTabs } from "@/components/cod-section-tabs";
 import { PageHead } from "@/components/page-head";
 import { requirePagePermission } from "@/lib/authorization";
@@ -35,7 +34,7 @@ export default async function CashInAssociateStationPage(props: {
   const summary = payload?.summary;
 
   return (
-    <AppShell active="COD" pageCode="cod_executive_reconciliation">
+    <>
       <PageHead
         eyebrow="Ops Pulse · Station drill-down"
         title={`${stationCode || "Station"} · Cash In Associate`}
@@ -47,8 +46,7 @@ export default async function CashInAssociateStationPage(props: {
         }
       />
       <CodSectionTabs active="cash-in-associate" />
-
-      {error ? (
+{error ? (
         <section className="panel message-panel error">
           <div className="panel-body">
             <strong>Unable to load station</strong>
@@ -108,6 +106,6 @@ export default async function CashInAssociateStationPage(props: {
           <CiaDriverPanel drivers={payload.pendingDrivers} />
         </>
       ) : null}
-    </AppShell>
+    </>
   );
 }

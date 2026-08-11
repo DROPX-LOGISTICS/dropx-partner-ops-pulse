@@ -1,6 +1,6 @@
 export function CodWorkspaceLoading({
   title = "Loading COD workspace",
-  subtitle = "Preparing station filters, tables, and live data…"
+  subtitle = "Preparing filters and live data…"
 }: {
   title?: string;
   subtitle?: string;
@@ -13,10 +13,6 @@ export function CodWorkspaceLoading({
         <span className="cod-loading-subtitle" />
         <p className="cod-loading-status">{title}</p>
         <p className="subtle cod-loading-hint">{subtitle}</p>
-      </div>
-
-      <div className="cod-loading-tabs" aria-hidden="true">
-        <i /><i /><i /><i />
       </div>
 
       <section className="panel cod-loading-panel" aria-hidden="true">

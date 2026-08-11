@@ -1,9 +1,7 @@
 "use server";
 
 import { randomUUID } from "crypto";
-import { cookies, type UnsafeUnwrappedCookies } from "next/headers";
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId, withCompany } from "@/lib/company-scope";
 import {
@@ -26,56 +24,18 @@ import {
 import { uploadOpsProof } from "@/lib/ops-pulse/upload";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
-const publicPagePath = "/cod/submission";
+export type CodSubmissionActionState = {
+  ok: boolean;
+  error?: string;
+  notice?: string;
+  submissionId?: string;
+};
 
-function isRedirectError(error: unknown) {
-  const digest = (error as { digest?: unknown })?.digest;
-  return typeof digest === "string" && digest.startsWith("NEXT_REDIRECT");
-}
-
-function resolveFormType(
-  station: CodLocationRow,
-  clientHint: string
-): CodFormType | "" {
+function resolveFormType(station: CodLocationRow, clientHint: string): CodFormType | "" {
   const inferred = inferFormTypeFromLocation(station);
   if (inferred) return inferred;
   if (clientHint === "amazon" || clientHint === "flipkart") return clientHint;
   return "";
-}
-
-function redirectWithFlash(params: {
-  error?: string;
-  notice?: string;
-  client?: string;
-}): never {
-  const payload = {
-    error: params.error ?? null,
-    notice: params.notice ?? null
-  };
-  try {
-    (cookies() as unknown as UnsafeUnwrappedCookies).set(
-      "dropx_cod_submission_flash",
-      JSON.stringify(payload),
-      {
-        httpOnly: true,
-        maxAge: 60,
-        path: "/",
-        sameSite: "lax"
-      }
-    );
-  } catch {
-    /* cookie optional — URL params are the reliable flash */
-  }
-
-  const qs = new URLSearchParams();
-  if (params.client === "amazon" || params.client === "flipkart") {
-    qs.set("client", params.client);
-  }
-  // Prefer short URL flash so message always shows even if cookie is dropped.
-  if (params.error) qs.set("flash_error", params.error.slice(0, 500));
-  if (params.notice) qs.set("flash_notice", params.notice.slice(0, 500));
-  const query = qs.toString();
-  redirect(query ? `${publicPagePath}?${query}` : publicPagePath);
 }
 
 async function stationDetails(companyId: string, locationId: string) {
@@ -102,6 +62,7 @@ async function verifyAmazonRemittance(params: {
       "Cash recon worker is not configured. Set CASH_RECON_WORKER_URL and CASH_RECON_ADMIN_KEY."
     );
   }
+  // Same remittance API as Executive Reconciliation — match code + amount locally.
   const verify = await verifyRemittance({
     stationCode: params.stationCode,
     date: params.depositDate,
@@ -118,13 +79,14 @@ async function verifyAmazonRemittance(params: {
       amount: verify.amount,
       matches: verify.matches,
       nearMisses: verify.nearMisses,
-      checkedAt: new Date().toISOString()
+      checkedAt: new Date().toISOString(),
+      source: "executive/remittance"
     }
   };
   if (!verify.verified) {
     if (!verify.codeFound) {
       throw new Error(
-        `Remittance code ${params.remittanceCode} was not found on Amazon portal for ${params.depositDate}. Fix the code or date and try again.`
+        `Remittance code ${params.remittanceCode} was not found on Amazon portal for ${params.depositDate} (checked creation, submission, and lookback window).`
       );
     }
     const near = verify.nearMisses[0]?.actualAmount;
@@ -137,12 +99,23 @@ async function verifyAmazonRemittance(params: {
   return validationPayload;
 }
 
-export async function createCodSubmission(formData: FormData) {
-  const authorization = await requirePagePermission("cod_submission", "add");
-  const companyId = requireCompanyId(authorization);
-  const clientHint = String(formData.get("client") ?? "").trim().toLowerCase();
+function revalidateCodPaths() {
+  revalidatePath("/ops-pulse/cod/submission");
+  revalidatePath("/cod/submission");
+  revalidatePath("/ops-pulse/cod/reports");
+  revalidatePath("/cod/reports");
+}
+
+export async function createCodSubmission(
+  _prev: CodSubmissionActionState | null,
+  formData: FormData
+): Promise<CodSubmissionActionState> {
   try {
+    const authorization = await requirePagePermission("cod_submission", "add");
+    const companyId = requireCompanyId(authorization);
+    const clientHint = String(formData.get("client") ?? "").trim().toLowerCase();
     if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
+
     const locationId = required(formData.get("location_id"), "Station");
     if (!authorization.hasAllLocationAccess && !authorization.locationScopeIds.includes(locationId)) {
       throw new Error("You do not have access to the selected station.");
@@ -235,32 +208,33 @@ export async function createCodSubmission(formData: FormData) {
     );
     if (error) throw new Error(error.message);
 
-    revalidatePath("/ops-pulse/cod/submission");
-    revalidatePath("/cod/submission");
-    revalidatePath("/ops-pulse/cod/reports");
-    revalidatePath("/cod/reports");
-    redirectWithFlash({
+    revalidateCodPaths();
+    return {
+      ok: true,
+      submissionId,
       notice:
         formType === "amazon"
           ? "COD submission saved — remittance verified against Amazon portal."
-          : "COD submission saved with deposit slip.",
-      client: formType || (clientHint === "amazon" || clientHint === "flipkart" ? clientHint : undefined)
-    });
+          : "COD submission saved with deposit slip."
+    };
   } catch (error) {
-    if (isRedirectError(error)) throw error;
-    redirectWithFlash({
-      error: error instanceof Error ? error.message : "Unable to submit COD proof.",
-      client: clientHint === "amazon" || clientHint === "flipkart" ? clientHint : undefined
-    });
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Unable to submit COD proof."
+    };
   }
 }
 
-export async function updateCodSubmission(formData: FormData) {
-  const authorization = await requirePagePermission("cod_submission", "edit");
-  const companyId = requireCompanyId(authorization);
-  const clientHint = String(formData.get("client") ?? "").trim().toLowerCase();
+export async function updateCodSubmission(
+  _prev: CodSubmissionActionState | null,
+  formData: FormData
+): Promise<CodSubmissionActionState> {
   try {
+    const authorization = await requirePagePermission("cod_submission", "edit");
+    const companyId = requireCompanyId(authorization);
+    const clientHint = String(formData.get("client") ?? "").trim().toLowerCase();
     if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
+
     const submissionId = required(formData.get("submission_id"), "Submission");
     const locationId = required(formData.get("location_id"), "Station");
     if (!authorization.hasAllLocationAccess && !authorization.locationScopeIds.includes(locationId)) {
@@ -371,22 +345,19 @@ export async function updateCodSubmission(formData: FormData) {
       .eq("id", submissionId);
     if (error) throw new Error(error.message);
 
-    revalidatePath("/ops-pulse/cod/submission");
-    revalidatePath("/cod/submission");
-    revalidatePath("/ops-pulse/cod/reports");
-    revalidatePath("/cod/reports");
-    redirectWithFlash({
+    revalidateCodPaths();
+    return {
+      ok: true,
+      submissionId,
       notice:
         formType === "amazon"
           ? "COD submission updated — remittance re-verified."
-          : "COD submission updated.",
-      client: formType || (clientHint === "amazon" || clientHint === "flipkart" ? clientHint : undefined)
-    });
+          : "COD submission updated."
+    };
   } catch (error) {
-    if (isRedirectError(error)) throw error;
-    redirectWithFlash({
-      error: error instanceof Error ? error.message : "Unable to update COD submission.",
-      client: clientHint === "amazon" || clientHint === "flipkart" ? clientHint : undefined
-    });
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Unable to update COD submission."
+    };
   }
 }

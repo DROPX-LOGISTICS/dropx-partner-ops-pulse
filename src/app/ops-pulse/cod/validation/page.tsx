@@ -1,5 +1,4 @@
 import { cookies, type UnsafeUnwrappedCookies } from "next/headers";
-import { AppShell } from "@/components/app-shell";
 import { CodSectionTabs } from "@/components/cod-section-tabs";
 import { PageHead } from "@/components/page-head";
 import { StatusPill } from "@/components/status-pill";
@@ -70,7 +69,7 @@ export default async function CodValidationPage(props: { searchParams?: Promise<
   const setupError = submissionsResult.error && isMissingCodSetup({ message: submissionsResult.error }) ? submissionsResult.error : null;
 
   return (
-    <AppShell active="COD" pageCode="cod_validation">
+    <>
       <PageHead
         eyebrow="Ops Pulse"
         title="COD Validation"
@@ -78,8 +77,7 @@ export default async function CodValidationPage(props: { searchParams?: Promise<
         action={<span className={`status-pill ${isSupabaseAdminConfigured ? "good" : "warn"}`}>{isSupabaseAdminConfigured ? "Database connected" : "Database key missing"}</span>}
       />
       <CodSectionTabs active="validation" />
-
-      {setupError ? (
+{setupError ? (
         <section className="panel message-panel error">
           <div className="panel-body"><strong>Database setup needed</strong><p className="subtle" style={{ marginTop: 6 }}>{codSetupMessage(setupError)}</p></div>
         </section>
@@ -181,6 +179,6 @@ export default async function CodValidationPage(props: { searchParams?: Promise<
           </section>
         </>
       ) : null}
-    </AppShell>
+    </>
   );
 }

@@ -1,5 +1,4 @@
 import { cookies, type UnsafeUnwrappedCookies } from "next/headers";
-import { AppShell } from "@/components/app-shell";
 import { CodSectionTabs } from "@/components/cod-section-tabs";
 import { PageHead } from "@/components/page-head";
 import { StatusPill } from "@/components/status-pill";
@@ -295,7 +294,7 @@ export default async function ExecutiveReconciliationPage(props: { searchParams?
     step: String(step)
   });
   return (
-    <AppShell active="COD" pageCode="cod_executive_reconciliation">
+    <>
       <PageHead
         eyebrow="Ops Pulse"
         title="Executive Reconciliation"
@@ -303,8 +302,7 @@ export default async function ExecutiveReconciliationPage(props: { searchParams?
         action={<span className={`status-pill ${automationReady ? "good" : "warn"}`}>{automationReady ? "Automation ready" : "Setup required"}</span>}
       />
       <CodSectionTabs active="executive-reconciliation" />
-
-      {setupError ? (
+{setupError ? (
         <section className="panel message-panel error">
           <div className="panel-body">
             <strong>Database setup needed</strong>
@@ -693,6 +691,6 @@ export default async function ExecutiveReconciliationPage(props: { searchParams?
           ) : null}
         </CashStepGateProvider>
       ) : null}
-    </AppShell>
+    </>
   );
 }
