@@ -40,7 +40,7 @@ export default async function CashInAssociateNetworkPage() {
         }
       />
       <CodSectionTabs active="cash-in-associate" />
-{error ? (
+      {error ? (
         <section className="panel message-panel error">
           <div className="panel-body">
             <strong>Unable to load Cash In Associate</strong>
@@ -105,6 +105,7 @@ export default async function CashInAssociateNetworkPage() {
             asOfDate={payload.asOfDate}
             windowFrom={payload.window.from}
             windowTo={payload.window.to}
+            runStatus={payload.run?.status ?? null}
           />
         </>
       ) : null}

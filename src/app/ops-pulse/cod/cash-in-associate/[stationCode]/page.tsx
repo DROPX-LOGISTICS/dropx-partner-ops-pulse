@@ -1,10 +1,9 @@
-import Link from "next/link";
 import { CodSectionTabs } from "@/components/cod-section-tabs";
 import { PageHead } from "@/components/page-head";
 import { requirePagePermission } from "@/lib/authorization";
 import { formatAmount, formatDateTime } from "@/lib/ops-pulse/cod";
 import { fetchCiaStation, isCashReconWorkerConfigured } from "@/lib/ops-pulse/cash-recon-worker";
-import { CiaDriverPanel } from "../cia-client";
+import { CiaDriverPanel, CiaStationRefreshButton } from "../cia-client";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -40,13 +39,16 @@ export default async function CashInAssociateStationPage(props: {
         title={`${stationCode || "Station"} · Cash In Associate`}
         subtitle="Pending associate cash by driver, date, and shipment — plus station ageing vs deposits."
         action={
-          <Link className="button secondary" href="/ops-pulse/cod/cash-in-associate" prefetch={false}>
-            ← Network view
-          </Link>
+          <span className={`status-pill ${payload ? "good" : "warn"}`}>
+            {payload?.snapshotStatus ? `Snapshot ${payload.snapshotStatus}` : error ? "Unavailable" : "Loading"}
+          </span>
         }
       />
       <CodSectionTabs active="cash-in-associate" />
-{error ? (
+
+      {stationCode ? <CiaStationRefreshButton stationCode={stationCode} /> : null}
+
+      {error ? (
         <section className="panel message-panel error">
           <div className="panel-body">
             <strong>Unable to load station</strong>

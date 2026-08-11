@@ -679,3 +679,91 @@ export async function fetchCiaStation(stationCode: string): Promise<CiaStationPa
     cached: Boolean(raw.cached)
   };
 }
+
+async function postWorkerJsonOnce<T>(path: string, body?: Record<string, unknown>, query?: Record<string, string>): Promise<T> {
+  const { baseUrl, adminKey } = workerConfig();
+  if (!baseUrl || !adminKey) {
+    throw new Error("Cash recon worker is not configured. Set CASH_RECON_WORKER_URL and CASH_RECON_ADMIN_KEY.");
+  }
+
+  const url = new URL(`${baseUrl}${path}`);
+  if (query) {
+    for (const [key, value] of Object.entries(query)) {
+      if (value) url.searchParams.set(key, value);
+    }
+  }
+
+  const response = await fetch(url.toString(), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-admin-key": adminKey
+    },
+    body: JSON.stringify(body ?? {}),
+    cache: "no-store"
+  });
+
+  const text = await response.text();
+  return (await parseWorkerResponse(response, text)) as T;
+}
+
+export type CiaStationRefreshResult = {
+  status: string;
+  stationCode: string;
+  runId: string;
+  snapshotStatus: string;
+  error: string | null;
+};
+
+export type CiaNetworkRefreshResult = {
+  status: string;
+  resumed: boolean;
+  run: {
+    id: string;
+    status: string;
+    stationsTotal: number;
+    stationsOk: number;
+    stationsFailed: number;
+  } | null;
+  message: string;
+};
+
+/** Refresh one station synchronously from Amazon portals. */
+export async function refreshCiaStation(stationCode: string): Promise<CiaStationRefreshResult> {
+  const code = stationCode.trim().toUpperCase();
+  const raw = await postWorkerJsonOnce<Record<string, unknown>>(
+    "/api/admin/executive/cash-in-associate/refresh",
+    { stationCode: code },
+    { stationCode: code }
+  );
+  return {
+    status: String(raw.status ?? "ok"),
+    stationCode: String(raw.stationCode ?? code).toUpperCase(),
+    runId: String(raw.runId ?? ""),
+    snapshotStatus: String(raw.snapshotStatus ?? "ok"),
+    error: raw.error == null ? null : String(raw.error)
+  };
+}
+
+/** Start/resume full network snapshot (ticker processes one station every ~3 min). */
+export async function refreshCiaNetwork(): Promise<CiaNetworkRefreshResult> {
+  const raw = await postWorkerJsonOnce<Record<string, unknown>>(
+    "/api/admin/executive/cash-in-associate/refresh",
+    {}
+  );
+  const runRaw = raw.run && typeof raw.run === "object" ? (raw.run as Record<string, unknown>) : null;
+  return {
+    status: String(raw.status ?? "accepted"),
+    resumed: Boolean(raw.resumed),
+    run: runRaw
+      ? {
+          id: String(runRaw.id ?? ""),
+          status: String(runRaw.status ?? "running"),
+          stationsTotal: Number(runRaw.stationsTotal ?? 0) || 0,
+          stationsOk: Number(runRaw.stationsOk ?? 0) || 0,
+          stationsFailed: Number(runRaw.stationsFailed ?? 0) || 0
+        }
+      : null,
+    message: String(raw.message ?? "Snapshot run started.")
+  };
+}

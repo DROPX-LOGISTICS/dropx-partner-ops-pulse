@@ -5,6 +5,132 @@
   background: linear-gradient(180deg, #fffaf3 0%, #ffffff 70%);
 }
 
+.cia-refresh-bar {
+  margin-top: 14px;
+  border-color: #f0d9b5;
+  background: linear-gradient(135deg, #fffaf3 0%, #ffffff 55%, #f8fafc 100%);
+}
+
+.cia-refresh-bar-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.cia-refresh-bar h2 {
+  margin: 0;
+  font-size: 16px;
+  color: var(--ink);
+}
+
+.cia-refresh-bar p {
+  margin: 4px 0 0;
+}
+
+.cia-refresh-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.cia-refresh-all {
+  min-width: 180px;
+  box-shadow: 0 8px 20px rgba(185, 28, 28, 0.14);
+}
+
+.cia-row-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.cia-actions-col {
+  text-align: right !important;
+  min-width: 168px;
+}
+
+.cia-icon-btn {
+  height: 30px;
+  padding: 0 10px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.cia-row.is-refreshing {
+  outline: 1px solid rgba(247, 144, 9, 0.35);
+  background: #fff8eb;
+}
+
+.cia-spin {
+  animation: cia-spin 0.8s linear infinite;
+}
+
+@keyframes cia-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.cia-station-refresh {
+  margin: 14px 0 0;
+  display: grid;
+  gap: 10px;
+}
+
+.cia-station-refresh-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.cia-inline-notice {
+  display: grid;
+  gap: 2px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid #e8edf3;
+  background: #f8fafc;
+  font-size: 13px;
+}
+
+.cia-inline-notice strong {
+  font-size: 13px;
+}
+
+.cia-inline-notice.ok {
+  border-color: #abe7c6;
+  background: #f0fdf6;
+  color: #027a48;
+}
+
+.cia-inline-notice.error {
+  border-color: #fecdca;
+  background: #fff5f4;
+  color: #b42318;
+}
+
+.cia-inline-notice.info {
+  border-color: #f5c27a;
+  background: #fffaf3;
+  color: #b54708;
+}
+
+.message-panel.info {
+  border-color: #f5c27a;
+  background: #fffaf3;
+}
+
+.message-panel.info strong {
+  color: #b54708;
+}
+
 .cia-run-meta {
   margin-top: 0;
 }
@@ -343,5 +469,20 @@
 
   .cia-driver-meta {
     text-align: left;
+  }
+
+  .cia-refresh-bar-inner,
+  .cia-station-refresh-actions {
+    align-items: stretch;
+  }
+
+  .cia-refresh-actions,
+  .cia-row-actions {
+    width: 100%;
+  }
+
+  .cia-refresh-actions .button,
+  .cia-row-actions .button {
+    flex: 1 1 auto;
   }
 }
