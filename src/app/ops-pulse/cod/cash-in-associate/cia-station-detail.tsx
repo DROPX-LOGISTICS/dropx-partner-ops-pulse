@@ -1,8 +1,8 @@
 "use client";
 
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useMemo, useState, useTransition } from "react";
-import { CalendarDays, ChevronDown, ChevronRight, Search, Users } from "lucide-react";
+import { CalendarDays, ChevronDown, ChevronRight, Loader2, Search, Users } from "lucide-react";
 import { formatAmount } from "@/lib/ops-pulse/cod";
 import {
   addDaysYmd,
@@ -14,7 +14,7 @@ import {
 } from "@/lib/ops-pulse/cia-types";
 
 const PAGE_SIZE = 12;
-const REPORT_LOOKBACK_DAYS = 90;
+const MAX_LOOKBACK_DAYS = 90;
 type DetailView = "driver" | "date";
 
 function moneyClass(value: number) {
@@ -27,39 +27,23 @@ function validYmd(value: string | null | undefined) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(value ?? ""));
 }
 
-function inSelectedRange(date: string | null | undefined, fromDate: string, toDate: string) {
-  const raw = String(date ?? "").trim();
-  if (!validYmd(raw)) return true;
-  if (fromDate && raw < fromDate) return false;
-  if (toDate && raw > toDate) return false;
-  return true;
-}
-
-function filterDriversByDateRange(drivers: CiaPendingDriver[], fromDate: string, toDate: string) {
-  return drivers
-    .map((driver) => {
-      const shipments = driver.shipments.filter((shipment) => inSelectedRange(shipment.keptOnDate, fromDate, toDate));
-      if (shipments.length === 0) return null;
-      const dates = [...new Set(shipments.map((shipment) => shipment.keptOnDate).filter(Boolean))] as string[];
-      const amount = shipments.reduce((sum, shipment) => sum + shipment.pendingAmount, 0);
-      return {
-        ...driver,
-        amount,
-        shipmentCount: shipments.length,
-        dates,
-        shipments
-      };
-    })
-    .filter((driver): driver is CiaPendingDriver => Boolean(driver))
-    .sort((a, b) => b.amount - a.amount);
+function clampYmd(value: string, min: string, max: string) {
+  if (!validYmd(value)) return min;
+  if (value < min) return min;
+  if (value > max) return max;
+  return value;
 }
 
 function buildStationHref(
   pathname: string,
-  params: { reportDate?: string; view?: DetailView; focusDay?: string; fromDate?: string; toDate?: string }
+  params: {
+    view?: DetailView;
+    focusDay?: string;
+    fromDate?: string;
+    toDate?: string;
+  }
 ) {
   const next = new URLSearchParams();
-  if (params.reportDate) next.set("reportDate", params.reportDate);
   if (params.view && params.view !== "driver") next.set("view", params.view);
   if (params.focusDay) next.set("focusDay", params.focusDay);
   if (params.fromDate) next.set("from", params.fromDate);
@@ -73,9 +57,7 @@ export function CiaStationDetail({
   drivers,
   windowFrom,
   windowTo,
-  reportDate,
-  reportSavedAt,
-  availableReportDates
+  reportSavedAt
 }: {
   stationCode: string;
   drivers: CiaPendingDriver[];
@@ -90,41 +72,51 @@ export function CiaStationDetail({
   const searchParams = useSearchParams();
   const [pending, startTransition] = useTransition();
 
+  const yesterday = addDaysYmd(todayIstYmd(), -1);
+  const earliestAllowed = addDaysYmd(yesterday, -(MAX_LOOKBACK_DAYS - 1));
+
   const view: DetailView = searchParams.get("view") === "date" ? "date" : "driver";
   const focusDay = searchParams.get("focusDay")?.trim() ?? "";
-  const fromDate = validYmd(searchParams.get("from")) ? String(searchParams.get("from")) : windowFrom;
-  const toDate = validYmd(searchParams.get("to")) ? String(searchParams.get("to")) : windowTo;
+  const hasExplicitRange = validYmd(searchParams.get("from")) && validYmd(searchParams.get("to"));
+  const appliedFrom = hasExplicitRange
+    ? clampYmd(String(searchParams.get("from")), earliestAllowed, yesterday)
+    : clampYmd(windowFrom || earliestAllowed, earliestAllowed, yesterday);
+  const appliedTo = hasExplicitRange
+    ? clampYmd(String(searchParams.get("to")), earliestAllowed, yesterday)
+    : clampYmd(windowTo || yesterday, earliestAllowed, yesterday);
 
-  const yesterday = addDaysYmd(todayIstYmd(), -1);
-  const earliestReport = addDaysYmd(todayIstYmd(), -REPORT_LOOKBACK_DAYS);
-  const savedDates = useMemo(() => {
-    const set = new Set(availableReportDates);
-    if (reportDate) set.add(reportDate);
-    return [...set].sort((a, b) => b.localeCompare(a));
-  }, [availableReportDates, reportDate]);
+  // Draft values stay local until the user clicks Apply — avoids month-nav
+  // in the native date picker accidentally navigating / collapsing the range.
+  const [draftFrom, setDraftFrom] = useState(appliedFrom);
+  const [draftTo, setDraftTo] = useState(appliedTo);
+  const [formError, setFormError] = useState<string | null>(null);
 
-  const rangeDrivers = useMemo(
-    () => filterDriversByDateRange(drivers, fromDate, toDate),
-    [drivers, fromDate, toDate]
-  );
-  const dateRows = useMemo(() => buildCiaDateRows(rangeDrivers), [rangeDrivers]);
+  useEffect(() => {
+    setDraftFrom(appliedFrom);
+    setDraftTo(appliedTo);
+    setFormError(null);
+  }, [appliedFrom, appliedTo]);
+
+  const dirty = draftFrom !== appliedFrom || draftTo !== appliedTo;
+
+  const dateRows = useMemo(() => buildCiaDateRows(drivers), [drivers]);
   const filteredDateRows = useMemo(() => {
     if (!focusDay) return dateRows;
     return dateRows.filter((row) => row.date === focusDay);
   }, [dateRows, focusDay]);
 
   function navigate(params: {
-    reportDate?: string;
     view?: DetailView;
     focusDay?: string | null;
     fromDate?: string;
     toDate?: string;
+    keepRange?: boolean;
   }) {
+    const includeRange = params.fromDate !== undefined || params.toDate !== undefined || (params.keepRange !== false && hasExplicitRange);
     const href = buildStationHref(pathname, {
-      reportDate: params.reportDate !== undefined ? params.reportDate : (reportDate || undefined),
       view: params.view ?? view,
-      fromDate: params.fromDate !== undefined ? params.fromDate : fromDate,
-      toDate: params.toDate !== undefined ? params.toDate : toDate,
+      fromDate: includeRange ? (params.fromDate ?? appliedFrom) : undefined,
+      toDate: includeRange ? (params.toDate ?? appliedTo) : undefined,
       focusDay:
         params.focusDay === null || params.focusDay === ""
           ? undefined
@@ -137,106 +129,125 @@ export function CiaStationDetail({
     navigate({ view: nextView, focusDay: nextView === "date" ? focusDay || undefined : null });
   }
 
-  function setReportDate(nextDate: string) {
-    navigate({ reportDate: nextDate || undefined, focusDay: null });
-  }
-
   function setFocusDay(day: string) {
     navigate({ view: "date", focusDay: day || null });
   }
 
-  function setRange(nextFrom: string, nextTo: string) {
-    navigate({ fromDate: nextFrom, toDate: nextTo, focusDay: null });
+  function applyPreset(days: number) {
+    const to = yesterday;
+    const from = clampYmd(addDaysYmd(to, -(days - 1)), earliestAllowed, yesterday);
+    setDraftFrom(from);
+    setDraftTo(to);
+    setFormError(null);
+  }
+
+  function applyRange() {
+    const from = clampYmd(draftFrom, earliestAllowed, yesterday);
+    const to = clampYmd(draftTo, earliestAllowed, yesterday);
+    if (from > to) {
+      setFormError("From date must be on or before To date.");
+      setDraftFrom(from);
+      setDraftTo(to);
+      return;
+    }
+    setFormError(null);
+    setDraftFrom(from);
+    setDraftTo(to);
+    navigate({ fromDate: from, toDate: to, focusDay: null });
   }
 
   return (
     <div className="cia-station-detail">
       <section className="panel cia-period-panel">
-        <div className="panel-body cia-period-inner">
-          <div className="cia-period-copy">
-            <CalendarDays size={20} aria-hidden />
+        <div className="panel-body">
+          <div className="cia-period-header">
             <div>
-              <strong>Choose the period you want to check</strong>
+              <h2>Check cash for a date range</h2>
               <p className="subtle">
-                Data is available in this report from {formatCiaDisplayDate(windowFrom)} to {formatCiaDisplayDate(windowTo)}.
-                {" "}You are currently viewing {formatCiaDisplayDate(fromDate)} to {formatCiaDisplayDate(toDate)}.
-                {reportSavedAt ? ` Report updated ${reportSavedAt}.` : ""}
+                Pick any period up to the last {MAX_LOOKBACK_DAYS} days, then click Show results.
+                Currently showing {formatCiaDisplayDate(appliedFrom)} to {formatCiaDisplayDate(appliedTo)}
+                {reportSavedAt ? ` · updated ${reportSavedAt}` : ""}.
               </p>
+            </div>
+            <div className="cia-preset-row">
+              <button type="button" className="button secondary cia-chip" disabled={pending} onClick={() => applyPreset(7)}>
+                Last 7 days
+              </button>
+              <button type="button" className="button secondary cia-chip" disabled={pending} onClick={() => applyPreset(30)}>
+                Last 30 days
+              </button>
+              <button type="button" className="button secondary cia-chip" disabled={pending} onClick={() => applyPreset(90)}>
+                Last 90 days
+              </button>
             </div>
           </div>
 
-          <div className="cia-period-controls">
-            <section className="cia-control-card">
-              <div className="cia-control-card-head">
-                <strong>Fetch data for this period</strong>
-                <p className="subtle">Choose the exact date range you want to check for this station.</p>
-              </div>
-              <div className="cia-date-range-fields">
-                <label className="cia-report-date">
-                  <span>From date</span>
-                  <input
-                    type="date"
-                    className="field"
-                    min={windowFrom}
-                    max={toDate || windowTo}
-                    value={fromDate}
-                    disabled={pending}
-                    onChange={(event) => {
-                      const nextFrom = event.target.value || windowFrom;
-                      const safeTo = toDate < nextFrom ? nextFrom : toDate;
-                      setRange(nextFrom, safeTo);
-                    }}
-                  />
-                </label>
-                <label className="cia-report-date">
-                  <span>To date</span>
-                  <input
-                    type="date"
-                    className="field"
-                    min={fromDate || windowFrom}
-                    max={windowTo}
-                    value={toDate}
-                    disabled={pending}
-                    onChange={(event) => {
-                      const nextTo = event.target.value || windowTo;
-                      const safeFrom = fromDate > nextTo ? nextTo : fromDate;
-                      setRange(safeFrom, nextTo);
-                    }}
-                  />
-                </label>
-              </div>
-            </section>
-
-            <section className="cia-control-card">
-              <div className="cia-control-card-head">
-                <strong>Open an older saved report</strong>
-                <p className="subtle">Jump to a saved report date when you want to review an earlier snapshot.</p>
-              </div>
-              <label className="cia-report-date">
-                <span>Saved report date</span>
-                <input
-                  type="date"
-                  className="field"
-                  min={earliestReport}
-                  max={yesterday}
-                  value={reportDate || yesterday}
-                  list="cia-saved-report-dates"
+          <div className="cia-range-form">
+            <label className="cia-range-field">
+              <span>From date</span>
+              <input
+                type="date"
+                className="field"
+                min={earliestAllowed}
+                max={yesterday}
+                value={draftFrom}
+                disabled={pending}
+                onChange={(event) => {
+                  const next = event.target.value;
+                  if (!validYmd(next)) return;
+                  setDraftFrom(clampYmd(next, earliestAllowed, yesterday));
+                  setFormError(null);
+                }}
+              />
+            </label>
+            <label className="cia-range-field">
+              <span>To date</span>
+              <input
+                type="date"
+                className="field"
+                min={earliestAllowed}
+                max={yesterday}
+                value={draftTo}
+                disabled={pending}
+                onChange={(event) => {
+                  const next = event.target.value;
+                  if (!validYmd(next)) return;
+                  setDraftTo(clampYmd(next, earliestAllowed, yesterday));
+                  setFormError(null);
+                }}
+              />
+            </label>
+            <div className="cia-range-actions">
+              <button
+                type="button"
+                className="button"
+                disabled={pending || (!dirty && !formError)}
+                onClick={() => applyRange()}
+              >
+                {pending ? <Loader2 size={16} className="cia-spin" /> : null}
+                {pending ? "Loading…" : "Show results"}
+              </button>
+              {dirty ? (
+                <button
+                  type="button"
+                  className="button secondary"
                   disabled={pending}
-                  onChange={(event) => setReportDate(event.target.value)}
-                />
-                <datalist id="cia-saved-report-dates">
-                  {savedDates.map((day) => (
-                    <option key={day} value={day} />
-                  ))}
-                </datalist>
-              </label>
-              {reportDate && savedDates.length > 0 && !savedDates.includes(reportDate) ? (
-                <p className="cia-period-hint subtle">
-                  No saved report for this date yet. Pick a highlighted date or refresh this station.
-                </p>
+                  onClick={() => {
+                    setDraftFrom(appliedFrom);
+                    setDraftTo(appliedTo);
+                    setFormError(null);
+                  }}
+                >
+                  Reset
+                </button>
               ) : null}
-            </section>
+            </div>
           </div>
+
+          {formError ? <p className="cia-range-error">{formError}</p> : null}
+          {dirty && !formError ? (
+            <p className="cia-range-hint subtle">Dates changed — click Show results to load this period.</p>
+          ) : null}
         </div>
       </section>
 
@@ -273,7 +284,7 @@ export function CiaStationDetail({
                 disabled={pending}
                 onChange={(event) => setFocusDay(event.target.value)}
               >
-                <option value="">All days in this report</option>
+                <option value="">All days in this period</option>
                 {dateRows.map((row) => (
                   <option key={row.date} value={row.date === "unknown" ? "" : row.date}>
                     {row.displayDate} · ₹{formatAmount(row.amount)}
@@ -286,7 +297,7 @@ export function CiaStationDetail({
       </section>
 
       {view === "driver" ? (
-        <CiaDriverView stationCode={stationCode} drivers={rangeDrivers} />
+        <CiaDriverView stationCode={stationCode} drivers={drivers} />
       ) : (
         <CiaDateView
           stationCode={stationCode}
@@ -350,7 +361,7 @@ function CiaDriverView({
 
         <div className="cia-driver-list">
           {pageRows.length === 0 ? (
-            <p className="subtle">No pending cash with drivers in this report.</p>
+            <p className="subtle">No pending cash with drivers in this period.</p>
           ) : pageRows.map((driver) => {
             const key = driver.driverName;
             const open = openKey === key;
@@ -503,7 +514,7 @@ function CiaDateView({
 
         <div className="cia-date-list">
           {pageRows.length === 0 ? (
-            <p className="subtle">No pending cash for the selected day in this report.</p>
+            <p className="subtle">No pending cash for the selected day in this period.</p>
           ) : pageRows.map((row) => {
             const open = openDate === row.date;
             return (

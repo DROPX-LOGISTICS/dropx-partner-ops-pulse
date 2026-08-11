@@ -17,7 +17,6 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 120;
 
 type SearchParams = {
-  reportDate?: string;
   view?: string;
   focusDay?: string;
   from?: string;
@@ -38,7 +37,6 @@ export default async function CashInAssociateStationPage(props: {
   const searchParams = await props.searchParams;
   const rawCode = String(params.stationCode ?? params.station ?? "").trim();
   const stationCode = decodeURIComponent(rawCode).trim().toUpperCase();
-  const reportDate = validYmd(searchParams?.reportDate) ? String(searchParams?.reportDate) : "";
   const fromDate = validYmd(searchParams?.from) ? String(searchParams?.from) : "";
   const toDate = validYmd(searchParams?.to) ? String(searchParams?.to) : "";
 
@@ -51,10 +49,10 @@ export default async function CashInAssociateStationPage(props: {
     error = "Cash recon worker is not configured. Set CASH_RECON_WORKER_URL and CASH_RECON_ADMIN_KEY.";
   } else {
     try {
-      payload = await fetchCiaStation(stationCode, {
-        ...(reportDate ? { asOfDate: reportDate } : {}),
-        ...(fromDate && toDate ? { fromDate, toDate } : {})
-      });
+      payload = await fetchCiaStation(
+        stationCode,
+        fromDate && toDate ? { fromDate, toDate } : undefined
+      );
     } catch (err) {
       error = err instanceof Error ? err.message : `Unable to load Cash In Associate for ${stationCode}.`;
     }
@@ -104,7 +102,9 @@ export default async function CashInAssociateStationPage(props: {
               <h2>{stationTitle}</h2>
               <p className="subtle">
                 {placeBits || "Station detail"}
-                {payload?.asOfDate ? ` · Data fetched for ${formatCiaDisplayDate(payload.asOfDate)}` : ""}
+                {payload?.window?.from && payload?.window?.to
+                  ? ` · Showing ${formatCiaDisplayDate(payload.window.from)} to ${formatCiaDisplayDate(payload.window.to)}`
+                  : ""}
               </p>
             </div>
           </div>

@@ -179,7 +179,74 @@
 
 .cia-period-panel {
   border-color: #dbeafe;
-  background: linear-gradient(135deg, #f0f7ff 0%, #ffffff 65%);
+  background: linear-gradient(135deg, #f5f9ff 0%, #ffffff 70%);
+}
+
+.cia-period-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.cia-period-header h2 {
+  margin: 0;
+  font-size: 16px;
+  color: var(--ink);
+}
+
+.cia-period-header p {
+  margin-top: 4px;
+  max-width: 560px;
+}
+
+.cia-preset-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.cia-chip {
+  height: 32px;
+  padding: 0 12px;
+  font-size: 12px;
+}
+
+.cia-range-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 12px;
+}
+
+.cia-range-field {
+  display: grid;
+  gap: 6px;
+  min-width: 160px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.cia-range-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding-bottom: 1px;
+}
+
+.cia-range-hint,
+.cia-range-error {
+  margin: 10px 0 0;
+  font-size: 13px;
+}
+
+.cia-range-error {
+  color: #b42318;
+  font-weight: 600;
 }
 
 .cia-period-inner {
@@ -754,10 +821,20 @@
 
   .cia-refresh-bar-inner,
   .cia-station-identity-inner,
-  .cia-period-inner,
   .cia-station-refresh-actions,
-  .cia-view-toolbar {
+  .cia-view-toolbar,
+  .cia-period-header,
+  .cia-range-form {
     align-items: stretch;
+  }
+
+  .cia-range-field,
+  .cia-range-actions {
+    width: 100%;
+  }
+
+  .cia-range-actions .button {
+    flex: 1 1 auto;
   }
 
   .cia-station-refresh.compact {
