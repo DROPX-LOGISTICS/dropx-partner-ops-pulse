@@ -421,29 +421,26 @@ export type RemittanceVerifyResult = {
   dateRange: { startTime: number | null; endTime: number | null };
 };
 
-const REMITTANCE_AMOUNT_TOLERANCE = 1;
-
-function ymdFromIstEpochMs(ms: number | null | undefined) {
-  if (ms == null || !Number.isFinite(ms)) return "";
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Kolkata",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit"
-  }).format(new Date(ms));
-}
-
-function normalizeRemittanceCode(code: string) {
-  return code.trim().toUpperCase();
-}
-
-function amountMatches(actual: number, expected: number) {
-  return Math.abs(Number(actual || 0) - Number(expected || 0)) <= REMITTANCE_AMOUNT_TOLERANCE;
-}
+type RawRemittanceVerify = {
+  status?: string;
+  stationCode?: string;
+  date?: string;
+  remittanceCode?: string;
+  amount?: number;
+  verified?: boolean;
+  codeFound?: boolean;
+  amountMatched?: boolean;
+  matches?: Array<RemittanceVerifyMatch & Record<string, unknown>>;
+  nearMisses?: Array<RemittanceVerifyMatch & Record<string, unknown>>;
+  sessionSource?: string | null;
+  accountKey?: string | null;
+  dateRange?: { startTime?: number; endTime?: number };
+};
 
 /**
- * Uses the same worker remittance endpoint as Executive Reconciliation
- * (`/api/admin/executive/remittance`), then matches code + amount locally.
+ * Dedicated verify endpoint — uses the full Amazon remittance lookback list
+ * (not only same-day creationDate rows from the ER remittance summary).
+ * Needed when deposit date matches submissionDate but creation was prior day.
  */
 export async function verifyRemittance(params: {
   stationCode: string;
@@ -452,87 +449,44 @@ export async function verifyRemittance(params: {
   amount: number;
   fresh?: boolean;
 }): Promise<RemittanceVerifyResult> {
-  const summary = await fetchRemittance({
+  const raw = await postWorker<RawRemittanceVerify>("/api/admin/executive/remittance/verify", {
     stationCode: params.stationCode,
-    date: params.date
-  });
-  const codeNorm = normalizeRemittanceCode(params.remittanceCode);
-  const rows = [...summary.created, ...summary.submitted];
-  const byCode = rows.filter((row) => normalizeRemittanceCode(row.remittanceCode || "") === codeNorm);
-
-  const toMatch = (
-    row: (typeof rows)[number],
-    matchedOn: RemittanceVerifyMatch["matchedOn"]
-  ): RemittanceVerifyMatch => ({
-    remittanceId: row.remittanceId,
-    remittanceCode: row.remittanceCode || null,
-    status: row.status,
-    actualAmount: row.actualAmount,
-    creationDate: row.creationDate ?? 0,
-    submissionDate: row.submissionDate,
-    matchedOn
-  });
-
-  const start = summary.dateRange.startTime;
-  const end = summary.dateRange.endTime;
-  const onCreationDay = byCode.filter((row) => {
-    if (start == null || end == null || row.creationDate == null) return false;
-    return row.creationDate >= start && row.creationDate <= end;
-  });
-  const creationHits = onCreationDay.filter((row) => amountMatches(row.actualAmount, params.amount));
-  if (creationHits.length) {
-    return {
-      status: summary.status,
-      stationCode: summary.stationCode,
-      date: summary.date,
-      remittanceCode: codeNorm,
-      amount: params.amount,
-      verified: true,
-      codeFound: true,
-      amountMatched: true,
-      matches: creationHits.map((row) => toMatch(row, "creation_date")),
-      nearMisses: onCreationDay.filter((row) => !amountMatches(row.actualAmount, params.amount)).map((row) => toMatch(row, "creation_date")),
-      sessionSource: summary.sessionSource,
-      accountKey: summary.accountKey,
-      dateRange: summary.dateRange
-    };
-  }
-
-  const onSubmissionDay = byCode.filter((row) => ymdFromIstEpochMs(row.submissionDate) === params.date);
-  const submissionHits = onSubmissionDay.filter((row) => amountMatches(row.actualAmount, params.amount));
-  if (submissionHits.length) {
-    return {
-      status: summary.status,
-      stationCode: summary.stationCode,
-      date: summary.date,
-      remittanceCode: codeNorm,
-      amount: params.amount,
-      verified: true,
-      codeFound: true,
-      amountMatched: true,
-      matches: submissionHits.map((row) => toMatch(row, "submission_date")),
-      nearMisses: onSubmissionDay.filter((row) => !amountMatches(row.actualAmount, params.amount)).map((row) => toMatch(row, "submission_date")),
-      sessionSource: summary.sessionSource,
-      accountKey: summary.accountKey,
-      dateRange: summary.dateRange
-    };
-  }
-
-  const lookbackHits = byCode.filter((row) => amountMatches(row.actualAmount, params.amount));
-  return {
-    status: summary.status,
-    stationCode: summary.stationCode,
-    date: summary.date,
-    remittanceCode: codeNorm,
+    date: params.date,
+    remittanceCode: params.remittanceCode,
     amount: params.amount,
-    verified: lookbackHits.length > 0,
-    codeFound: byCode.length > 0,
-    amountMatched: lookbackHits.length > 0,
-    matches: lookbackHits.map((row) => toMatch(row, "lookback")),
-    nearMisses: byCode.filter((row) => !amountMatches(row.actualAmount, params.amount)).map((row) => toMatch(row, "lookback")),
-    sessionSource: summary.sessionSource,
-    accountKey: summary.accountKey,
-    dateRange: summary.dateRange
+    fresh: params.fresh === true
+  });
+
+  const mapMatch = (row: RemittanceVerifyMatch & Record<string, unknown>): RemittanceVerifyMatch => ({
+    remittanceId: String(row.remittanceId ?? ""),
+    remittanceCode: row.remittanceCode == null ? null : String(row.remittanceCode),
+    status: String(row.status ?? ""),
+    actualAmount: moneyValue(row.actualAmount as never),
+    creationDate: Number(row.creationDate ?? 0) || 0,
+    submissionDate: row.submissionDate == null ? null : Number(row.submissionDate) || null,
+    matchedOn:
+      row.matchedOn === "creation_date" || row.matchedOn === "submission_date" || row.matchedOn === "lookback"
+        ? row.matchedOn
+        : undefined
+  });
+
+  return {
+    status: String(raw.status ?? "ok"),
+    stationCode: String(raw.stationCode ?? params.stationCode).toUpperCase(),
+    date: String(raw.date ?? params.date),
+    remittanceCode: String(raw.remittanceCode ?? params.remittanceCode).trim().toUpperCase(),
+    amount: moneyValue(raw.amount as never) || params.amount,
+    verified: Boolean(raw.verified),
+    codeFound: Boolean(raw.codeFound),
+    amountMatched: Boolean(raw.amountMatched),
+    matches: Array.isArray(raw.matches) ? raw.matches.map(mapMatch) : [],
+    nearMisses: Array.isArray(raw.nearMisses) ? raw.nearMisses.map(mapMatch) : [],
+    sessionSource: raw.sessionSource == null ? null : String(raw.sessionSource),
+    accountKey: raw.accountKey == null ? null : String(raw.accountKey),
+    dateRange: {
+      startTime: typeof raw.dateRange?.startTime === "number" ? raw.dateRange.startTime : null,
+      endTime: typeof raw.dateRange?.endTime === "number" ? raw.dateRange.endTime : null
+    }
   };
 }
 

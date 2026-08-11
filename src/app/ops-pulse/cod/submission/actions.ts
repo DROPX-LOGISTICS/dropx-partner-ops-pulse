@@ -62,7 +62,8 @@ async function verifyAmazonRemittance(params: {
       "Cash recon worker is not configured. Set CASH_RECON_WORKER_URL and CASH_RECON_ADMIN_KEY."
     );
   }
-  // Same remittance API as Executive Reconciliation — match code + amount locally.
+  // Dedicated remittance/verify endpoint (full lookback list). Needed when
+  // deposit date matches submissionDate but remittance was created prior day.
   const verify = await verifyRemittance({
     stationCode: params.stationCode,
     date: params.depositDate,
@@ -80,19 +81,19 @@ async function verifyAmazonRemittance(params: {
       matches: verify.matches,
       nearMisses: verify.nearMisses,
       checkedAt: new Date().toISOString(),
-      source: "executive/remittance"
+      source: "executive/remittance/verify"
     }
   };
   if (!verify.verified) {
     if (!verify.codeFound) {
       throw new Error(
-        `Remittance code ${params.remittanceCode} was not found on Amazon portal for ${params.depositDate} (checked creation, submission, and lookback window).`
+        `Remittance code ${params.remittanceCode} was not found on Amazon portal around ${params.depositDate}. Check the code, station, and deposit date (creation or submission day).`
       );
     }
     const near = verify.nearMisses[0]?.actualAmount;
     throw new Error(
       near != null
-        ? `Remittance code found but amount does not match (portal shows ${near}, you entered ${params.amount}).`
+        ? `Remittance code found but amount does not match (portal shows ${near}, you entered ${params.amount}). Use the slip / actual amount.`
         : `Remittance code found but amount does not match the portal for ${params.depositDate}.`
     );
   }
@@ -214,7 +215,7 @@ export async function createCodSubmission(
       submissionId,
       notice:
         formType === "amazon"
-          ? "COD submission saved — remittance verified against Amazon portal."
+          ? "COD submission saved — remittance verified (code, amount, deposit date)."
           : "COD submission saved with deposit slip."
     };
   } catch (error) {
