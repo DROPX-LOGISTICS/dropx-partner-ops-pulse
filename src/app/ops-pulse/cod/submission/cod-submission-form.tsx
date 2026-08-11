@@ -67,7 +67,7 @@ export function CodSubmissionForm({
           name="remittance_code"
           placeholder="e.g. AC544759"
           required
-          pattern="[A-Za-z0-9][A-Za-z0-9\s\-_./]*"
+          pattern="[A-Za-z0-9][A-Za-z0-9 ._/-]*"
           title="Alphanumeric remittance / CMS code"
           autoCapitalize="characters"
         />
@@ -77,7 +77,7 @@ export function CodSubmissionForm({
           className="field"
           name="submitter_name"
           placeholder="Name of station user"
-          pattern="[A-Za-z0-9][A-Za-z0-9\s\-_./]*"
+          pattern="[A-Za-z0-9][A-Za-z0-9 ._/-]*"
           title="Letters and numbers only"
         />
       </label>

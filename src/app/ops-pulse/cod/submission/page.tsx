@@ -2,10 +2,10 @@ import { cookies, type UnsafeUnwrappedCookies } from "next/headers";
 import { AppShell } from "@/components/app-shell";
 import { CodSectionTabs } from "@/components/cod-section-tabs";
 import { PageHead } from "@/components/page-head";
-import { StatusPill } from "@/components/status-pill";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import {
+  amountValue,
   codPeriod,
   codSetupMessage,
   depositAttachmentsFor,
@@ -23,6 +23,7 @@ import {
 } from "@/lib/ops-pulse/cod";
 import { isSupabaseAdminConfigured } from "@/lib/supabase-admin";
 import { CodSubmissionForm } from "./cod-submission-form";
+import { CodSubmissionRegister, type CodRegisterRow } from "./cod-submission-register";
 
 type SearchParams = {
   client?: string;
@@ -101,6 +102,36 @@ export default async function CodSubmissionPage(props: { searchParams?: Promise<
     ? searchParams.deposit_date
     : today;
 
+  const registerRows: CodRegisterRow[] = submissionsResult.rows.map((row) => {
+    const station = firstRelation(row.stations);
+    const slips = depositAttachmentsFor(row);
+    const depositRaw = String(row.deposit_date ?? "").slice(0, 10);
+    const fromRaw = String(row.cod_period_from ?? row.cod_date ?? depositRaw).slice(0, 10);
+    const toRaw = String(row.cod_period_to ?? fromRaw).slice(0, 10);
+    return {
+      id: row.id,
+      submittedAt: formatDateTime(row.created_at),
+      stationLabel: locationLabel(station) || row.station_code || "-",
+      client: row.client ?? formTypeLabel(row.form_type),
+      formType: row.form_type || inferFormTypeFromLocation(station) || "",
+      locationId: row.location_id || "",
+      stationCode: String(row.station_code ?? station?.station_code ?? "").trim().toUpperCase(),
+      codPeriod: codPeriod(row),
+      depositDate: depositRaw,
+      depositDateLabel: formatDate(depositRaw),
+      codPeriodFrom: fromRaw,
+      codPeriodTo: toRaw,
+      remittanceCode: row.remittance_code ?? row.reference_no ?? "",
+      amount: formatAmount(row.deposited_amount),
+      amountRaw: String(amountValue(row.deposited_amount)),
+      submitterName: row.submitter_name ?? "",
+      remarks: row.remarks ?? "",
+      status: row.validation_status,
+      hasSlip: slips.length > 0,
+      slipUrl: slips.length ? depositSlipViewUrl(row.id) : null
+    };
+  });
+
   return (
     <AppShell active="COD" pageCode="cod_submission">
       <PageHead
@@ -178,56 +209,16 @@ export default async function CodSubmissionPage(props: { searchParams?: Promise<
             <div className="panel-head">
               <div>
                 <h2>COD submission register</h2>
-                <p className="subtle">Recently added first. Use filters above to narrow the list.</p>
+                <p className="subtle">Recently added first. Preview the slip or edit a row from Actions.</p>
               </div>
-              <span className="count-badge">{submissionsResult.rows.length} records</span>
+              <span className="count-badge">{registerRows.length} records</span>
             </div>
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Submitted</th>
-                    <th>Station</th>
-                    <th>Client</th>
-                    <th>COD Date</th>
-                    <th>Deposit Date</th>
-                    <th>Remittance Code</th>
-                    <th>Amount</th>
-                    <th>Slip</th>
-                    <th>Status</th>
-                    <th>Remarks</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {submissionsResult.rows.length ? submissionsResult.rows.map((row) => {
-                    const station = firstRelation(row.stations);
-                    const slips = depositAttachmentsFor(row);
-                    return (
-                      <tr key={row.id}>
-                        <td>{formatDateTime(row.created_at)}</td>
-                        <td><strong>{locationLabel(station) || row.station_code || "-"}</strong></td>
-                        <td>{row.client ?? formTypeLabel(row.form_type)}</td>
-                        <td>{codPeriod(row)}</td>
-                        <td>{formatDate(row.deposit_date)}</td>
-                        <td>{row.remittance_code ?? row.reference_no ?? "-"}</td>
-                        <td>{formatAmount(row.deposited_amount)}</td>
-                        <td>
-                          {slips.length ? (
-                            <a href={depositSlipViewUrl(row.id)} rel="noreferrer" target="_blank">View</a>
-                          ) : (
-                            <span className="subtle">Missing</span>
-                          )}
-                        </td>
-                        <td><StatusPill status={row.validation_status} /></td>
-                        <td>{row.remarks || "-"}</td>
-                      </tr>
-                    );
-                  }) : (
-                    <tr><td className="empty-cell" colSpan={10}>No COD submissions found for this filter.</td></tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+            <CodSubmissionRegister
+              canEdit={Boolean(permission.canEdit) && isSupabaseAdminConfigured}
+              client={selectedClient}
+              rows={registerRows}
+              stationOptions={stationOptions}
+            />
           </section>
         </>
       ) : null}

@@ -278,7 +278,8 @@ export function alphaNumericFromForm(value: FormDataEntryValue | null, field: st
     if (options?.required === false) return null;
     throw new Error(`${field} is required.`);
   }
-  if (!/^[A-Za-z0-9][A-Za-z0-9\s\-_./]*$/.test(text)) {
+  // Keep hyphen last; avoid \s so HTML pattern (unicodeSets /v) stays valid.
+  if (!/^[A-Za-z0-9][A-Za-z0-9 ._/-]*$/.test(text)) {
     throw new Error(`${field} must be alphanumeric (letters and numbers only).`);
   }
   return text;
