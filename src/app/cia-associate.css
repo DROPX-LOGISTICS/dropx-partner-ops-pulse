@@ -76,10 +76,60 @@
   }
 }
 
+.cia-station-identity {
+  margin-top: 14px;
+  border-color: #f0d9b5;
+  background: linear-gradient(135deg, #fff8ef 0%, #ffffff 60%);
+}
+
+.cia-station-identity-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.cia-station-identity-main {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.cia-station-code-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 72px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: #111827;
+  color: #fff;
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  line-height: 1;
+}
+
+.cia-station-identity-main h2 {
+  margin: 0;
+  font-size: 18px;
+  color: var(--ink);
+}
+
+.cia-station-identity-main p {
+  margin: 4px 0 0;
+}
+
 .cia-station-refresh {
-  margin: 14px 0 0;
+  margin: 0;
   display: grid;
   gap: 10px;
+}
+
+.cia-station-refresh.compact {
+  justify-items: end;
 }
 
 .cia-station-refresh-actions {
@@ -87,7 +137,7 @@
   flex-wrap: wrap;
   gap: 10px;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
 }
 
 .cia-inline-notice {
@@ -472,8 +522,18 @@
   }
 
   .cia-refresh-bar-inner,
+  .cia-station-identity-inner,
   .cia-station-refresh-actions {
     align-items: stretch;
+  }
+
+  .cia-station-refresh.compact {
+    width: 100%;
+    justify-items: stretch;
+  }
+
+  .cia-station-refresh-actions {
+    justify-content: stretch;
   }
 
   .cia-refresh-actions,

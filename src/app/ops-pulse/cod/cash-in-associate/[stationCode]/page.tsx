@@ -1,7 +1,12 @@
 import { CodSectionTabs } from "@/components/cod-section-tabs";
 import { PageHead } from "@/components/page-head";
 import { requirePagePermission } from "@/lib/authorization";
-import { formatAmount, formatDateTime } from "@/lib/ops-pulse/cod";
+import { requireCompanyId } from "@/lib/company-scope";
+import {
+  formatAmount,
+  formatDateTime,
+  loadCodLocations
+} from "@/lib/ops-pulse/cod";
 import { fetchCiaStation, isCashReconWorkerConfigured } from "@/lib/ops-pulse/cash-recon-worker";
 import { CiaDriverPanel, CiaStationRefreshButton } from "../cia-client";
 
@@ -9,11 +14,13 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 120;
 
 export default async function CashInAssociateStationPage(props: {
-  params: Promise<{ stationCode: string }>;
+  params: Promise<{ stationCode?: string; station?: string }>;
 }) {
-  await requirePagePermission("cod_executive_reconciliation", "access");
-  const { stationCode: rawCode } = await props.params;
-  const stationCode = decodeURIComponent(rawCode || "").trim().toUpperCase();
+  const authorization = await requirePagePermission("cod_executive_reconciliation", "access");
+  const companyId = requireCompanyId(authorization);
+  const params = await props.params;
+  const rawCode = String(params.stationCode ?? params.station ?? "").trim();
+  const stationCode = decodeURIComponent(rawCode).trim().toUpperCase();
 
   let error: string | null = null;
   let payload: Awaited<ReturnType<typeof fetchCiaStation>> | null = null;
@@ -30,14 +37,34 @@ export default async function CashInAssociateStationPage(props: {
     }
   }
 
+  const displayCode = String(payload?.stationCode || stationCode || "").trim().toUpperCase();
+  const locationsResult = await loadCodLocations(
+    companyId,
+    authorization.locationScopeIds,
+    authorization.hasAllLocationAccess
+  );
+  const location = locationsResult.locations.find(
+    (entry) => String(entry.station_code ?? "").trim().toUpperCase() === displayCode
+  );
+  const stationName = String(location?.station_name ?? "").trim();
+  const stationTitle = location
+    ? (location.station_name
+      ? `${location.station_code} - ${location.station_name}`
+      : String(location.station_code || displayCode))
+    : (displayCode || "Station");
+  const placeBits = [location?.city, location?.state].filter(Boolean).join(", ");
   const summary = payload?.summary;
 
   return (
     <>
       <PageHead
         eyebrow="Ops Pulse · Station drill-down"
-        title={`${stationCode || "Station"} · Cash In Associate`}
-        subtitle="Pending associate cash by driver, date, and shipment — plus station ageing vs deposits."
+        title={displayCode || "Station"}
+        subtitle={
+          stationName
+            ? `${stationName}${placeBits ? ` · ${placeBits}` : ""} · Cash In Associate`
+            : "Cash In Associate — pending cash by driver, date, and shipment"
+        }
         action={
           <span className={`status-pill ${payload ? "good" : "warn"}`}>
             {payload?.snapshotStatus ? `Snapshot ${payload.snapshotStatus}` : error ? "Unavailable" : "Loading"}
@@ -46,12 +73,26 @@ export default async function CashInAssociateStationPage(props: {
       />
       <CodSectionTabs active="cash-in-associate" />
 
-      {stationCode ? <CiaStationRefreshButton stationCode={stationCode} /> : null}
+      <section className="panel cia-station-identity">
+        <div className="panel-body cia-station-identity-inner">
+          <div className="cia-station-identity-main">
+            <span className="cia-station-code-badge">{displayCode || "—"}</span>
+            <div>
+              <h2>{stationTitle}</h2>
+              <p className="subtle">
+                {placeBits || "Station Cash In Associate detail"}
+                {payload?.cached ? " · cached snapshot" : ""}
+              </p>
+            </div>
+          </div>
+          {displayCode ? <CiaStationRefreshButton stationCode={displayCode} compact /> : null}
+        </div>
+      </section>
 
       {error ? (
         <section className="panel message-panel error">
           <div className="panel-body">
-            <strong>Unable to load station</strong>
+            <strong>Unable to load {displayCode || "station"}</strong>
             <p className="subtle" style={{ marginTop: 6 }}>{error}</p>
           </div>
         </section>
@@ -86,6 +127,10 @@ export default async function CashInAssociateStationPage(props: {
             <div className="panel-body">
               <div className="cia-run-meta-grid">
                 <div>
+                  <span>Station</span>
+                  <strong>{displayCode}</strong>
+                </div>
+                <div>
                   <span>As of</span>
                   <strong>{payload.asOfDate || "—"}</strong>
                 </div>
@@ -97,15 +142,11 @@ export default async function CashInAssociateStationPage(props: {
                   <span>Fetched</span>
                   <strong>{payload.fetchedAt ? formatDateTime(payload.fetchedAt) : "—"}</strong>
                 </div>
-                <div>
-                  <span>Cleared in window</span>
-                  <strong>₹{formatAmount(summary.clearedInWindow)}</strong>
-                </div>
               </div>
             </div>
           </section>
 
-          <CiaDriverPanel drivers={payload.pendingDrivers} />
+          <CiaDriverPanel drivers={payload.pendingDrivers} stationCode={displayCode} />
         </>
       ) : null}
     </>

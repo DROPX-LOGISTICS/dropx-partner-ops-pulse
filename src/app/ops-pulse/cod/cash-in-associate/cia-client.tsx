@@ -23,6 +23,19 @@ type RefreshNotice = {
   detail: string;
 };
 
+function formatRunStatus(status: string | null | undefined) {
+  const raw = String(status ?? "").trim();
+  if (!raw) return "";
+  const labels: Record<string, string> = {
+    running: "In progress",
+    completed: "Completed",
+    completed_with_errors: "Completed with errors",
+    failed: "Failed",
+    queued: "Queued"
+  };
+  return labels[raw] ?? raw.replace(/_/g, " ");
+}
+
 async function postCiaRefresh(stationCode?: string) {
   const response = await fetch("/api/ops-pulse/cod/cash-recon/cash-in-associate/refresh", {
     method: "POST",
@@ -103,8 +116,8 @@ export function CiaNetworkClient({
       }
       setNotice({
         kind: "ok",
-        title: `${stationCode} refreshed`,
-        detail: "Latest ageing and bank-deposit snapshot saved. Reloading network view…"
+        title: `${stationCode} updated`,
+        detail: "Latest cash and deposit figures saved. Updating this page…"
       });
       startTransition(() => router.refresh());
     } catch (error) {
@@ -121,9 +134,10 @@ export function CiaNetworkClient({
   async function handleFullRefresh() {
     if (busy) return;
     const confirmed = window.confirm(
-      "Start a full network Cash In Associate refresh?\n\n"
-      + "This queues all stations. The worker processes one station every ~3 minutes "
-      + "(about 2 hours for a full run). You can keep using the page and refresh later."
+      "Refresh Cash In Associate for all stations?\n\n"
+      + "This starts a background run. Stations update one at a time "
+      + "(about every 3 minutes — roughly 2 hours for the full network). "
+      + "You can keep using this page; use “Update numbers” to see progress."
     );
     if (!confirmed) return;
 
@@ -133,19 +147,21 @@ export function CiaNetworkClient({
       const result = await postCiaRefresh();
       const run = result.run && typeof result.run === "object" ? (result.run as Record<string, unknown>) : null;
       const resumed = Boolean(result.resumed);
+      const done = Number(run?.stationsOk ?? 0);
+      const total = Number(run?.stationsTotal ?? stations.length) || stations.length;
       setNotice({
         kind: "info",
-        title: resumed ? "Full refresh resumed" : "Full refresh started",
+        title: resumed ? "Network refresh continued" : "Network refresh started",
         detail: run
-          ? `Run ${String(run.id ?? "").slice(0, 8)}… · ${Number(run.stationsOk ?? 0)}/${Number(run.stationsTotal ?? stations.length)} done so far. `
-            + "Ticker advances one station every ~3 minutes. Reload this page to see progress."
-          : String(result.message ?? "Network snapshot run accepted.")
+          ? `${done} of ${total} stations finished so far. `
+            + "New stations update about every 3 minutes — click “Update numbers” to check progress."
+          : String(result.message ?? "Network refresh accepted.")
       });
       startTransition(() => router.refresh());
     } catch (error) {
       setNotice({
         kind: "error",
-        title: "Could not start full refresh",
+        title: "Could not start network refresh",
         detail: error instanceof Error ? error.message : "Unknown refresh error"
       });
     } finally {
@@ -153,15 +169,17 @@ export function CiaNetworkClient({
     }
   }
 
+  const statusLabel = formatRunStatus(runStatus);
+
   return (
     <div className="cia-network">
       <section className="panel cia-refresh-bar">
         <div className="panel-body cia-refresh-bar-inner">
           <div>
-            <h2>Snapshot controls</h2>
+            <h2>Refresh data</h2>
             <p className="subtle">
-              Refresh one station live from Amazon, or queue a full network run.
-              {runStatus ? ` Current snapshot status: ${runStatus}.` : ""}
+              Pull the latest Cash In Associate figures from Amazon for one station, or refresh the whole network.
+              {statusLabel ? ` Last network run: ${statusLabel}.` : ""}
             </p>
           </div>
           <div className="cia-refresh-actions">
@@ -172,7 +190,7 @@ export function CiaNetworkClient({
               onClick={() => startTransition(() => router.refresh())}
             >
               {pending && !refreshingAll && !refreshingStation ? <Loader2 size={16} className="cia-spin" /> : <RefreshCw size={16} />}
-              Reload view
+              Update numbers
             </button>
             <button
               type="button"
@@ -181,7 +199,7 @@ export function CiaNetworkClient({
               onClick={() => void handleFullRefresh()}
             >
               {refreshingAll ? <Loader2 size={16} className="cia-spin" /> : <RefreshCw size={16} />}
-              {refreshingAll ? "Starting full refresh…" : "Refresh all stations"}
+              {refreshingAll ? "Starting…" : "Refresh all stations"}
             </button>
           </div>
         </div>
@@ -278,7 +296,7 @@ export function CiaNetworkClient({
         <div className="panel-head">
           <div>
             <h2>Station cash position</h2>
-            <p className="subtle">Use Refresh on a row to pull that station only. Open for driver drill-down.</p>
+            <p className="subtle">Refresh a row for that station only, or open it for driver-level detail.</p>
           </div>
         </div>
         <div className="panel-body table-wrap">
@@ -306,7 +324,7 @@ export function CiaNetworkClient({
                 return (
                   <tr key={row.stationCode} className={`cia-row severity-${row.severity}${isRowRefreshing ? " is-refreshing" : ""}`}>
                     <td>
-                      <Link className="cia-station-link" href={`/ops-pulse/cod/cash-in-associate/${row.stationCode}`}>
+                      <Link className="cia-station-link" href={`/cod/cash-in-associate/${encodeURIComponent(row.stationCode)}`}>
                         <strong>{row.stationCode}</strong>
                         <small>{row.accountKey && row.accountKey !== "default" ? row.accountKey : "default account"}</small>
                       </Link>
@@ -332,7 +350,7 @@ export function CiaNetworkClient({
                           {isRowRefreshing ? <Loader2 size={15} className="cia-spin" /> : <RefreshCw size={15} />}
                           <span>{isRowRefreshing ? "Refreshing…" : "Refresh"}</span>
                         </button>
-                        <Link className="button secondary cia-open-btn" href={`/ops-pulse/cod/cash-in-associate/${row.stationCode}`}>
+                        <Link className="button secondary cia-open-btn" href={`/cod/cash-in-associate/${encodeURIComponent(row.stationCode)}`}>
                           Open
                         </Link>
                       </div>
@@ -369,7 +387,13 @@ export function CiaNetworkClient({
   );
 }
 
-export function CiaStationRefreshButton({ stationCode }: { stationCode: string }) {
+export function CiaStationRefreshButton({
+  stationCode,
+  compact = false
+}: {
+  stationCode: string;
+  compact?: boolean;
+}) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [busy, setBusy] = useState(false);
@@ -386,8 +410,8 @@ export function CiaStationRefreshButton({ stationCode }: { stationCode: string }
       }
       setNotice({
         kind: "ok",
-        title: `${stationCode} refreshed`,
-        detail: "Latest snapshot saved. Reloading this station…"
+        title: `${stationCode} updated`,
+        detail: "Latest cash and deposit figures saved. Updating this page…"
       });
       startTransition(() => router.refresh());
     } catch (error) {
@@ -402,10 +426,10 @@ export function CiaStationRefreshButton({ stationCode }: { stationCode: string }
   }
 
   return (
-    <div className="cia-station-refresh">
+    <div className={`cia-station-refresh${compact ? " compact" : ""}`}>
       <div className="cia-station-refresh-actions">
-        <Link className="button secondary" href="/ops-pulse/cod/cash-in-associate" prefetch={false}>
-          ← Network view
+        <Link className="button secondary" href="/cod/cash-in-associate" prefetch={false}>
+          ← All stations
         </Link>
         <button
           type="button"
@@ -414,7 +438,7 @@ export function CiaStationRefreshButton({ stationCode }: { stationCode: string }
           onClick={() => void handleRefresh()}
         >
           {busy ? <Loader2 size={16} className="cia-spin" /> : <RefreshCw size={16} />}
-          {busy ? "Refreshing station…" : "Refresh this station"}
+          {busy ? "Updating…" : "Refresh station"}
         </button>
       </div>
       {notice ? (
@@ -428,8 +452,10 @@ export function CiaStationRefreshButton({ stationCode }: { stationCode: string }
 }
 
 export function CiaDriverPanel({
-  drivers
+  drivers,
+  stationCode
 }: {
+  stationCode?: string;
   drivers: Array<{
     driverName: string;
     tasId: string | null;
@@ -481,7 +507,7 @@ export function CiaDriverPanel({
     <section className="panel">
       <div className="panel-head">
         <div>
-          <h2>Pending drivers (Cash In Associate)</h2>
+          <h2>{stationCode ? `${stationCode} · Pending drivers` : "Pending drivers (Cash In Associate)"}</h2>
           <p className="subtle">Sorted high → low. Expand a driver to see pending shipments by date.</p>
         </div>
         <span className="count-badge">{filtered.length} drivers</span>
