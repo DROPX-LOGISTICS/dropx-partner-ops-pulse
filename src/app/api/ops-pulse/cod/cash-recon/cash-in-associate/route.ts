@@ -26,11 +26,12 @@ export async function GET(request: Request) {
     }
 
     const stationCode = new URL(request.url).searchParams.get("stationCode")?.trim().toUpperCase() ?? "";
+    const asOfDate = new URL(request.url).searchParams.get("asOfDate")?.trim() ?? "";
     if (!stationCode) {
       return NextResponse.json({ error: "stationCode is required." }, { status: 400 });
     }
 
-    const result = await fetchCiaStation(stationCode);
+    const result = await fetchCiaStation(stationCode, asOfDate ? { asOfDate } : undefined);
     return NextResponse.json(result);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to load Cash In Associate station.";

@@ -172,6 +172,211 @@
   color: #b54708;
 }
 
+.cia-station-detail {
+  display: grid;
+  gap: 14px;
+}
+
+.cia-period-panel {
+  border-color: #dbeafe;
+  background: linear-gradient(135deg, #f0f7ff 0%, #ffffff 65%);
+}
+
+.cia-period-inner {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+
+.cia-period-copy {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-width: 0;
+  flex: 1 1 320px;
+}
+
+.cia-period-copy svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  color: #2563eb;
+}
+
+.cia-period-copy strong {
+  display: block;
+  font-size: 15px;
+  color: var(--ink);
+}
+
+.cia-period-copy p {
+  margin-top: 4px;
+}
+
+.cia-period-controls {
+  display: grid;
+  gap: 8px;
+  min-width: 220px;
+}
+
+.cia-report-date {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.cia-period-hint {
+  margin: 0;
+  max-width: 260px;
+}
+
+.cia-view-toolbar {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.cia-view-toggle {
+  display: inline-flex;
+  padding: 4px;
+  border: 1px solid #e4e7ec;
+  border-radius: 10px;
+  background: #f8fafc;
+  gap: 4px;
+}
+
+.cia-view-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.cia-view-tab.active {
+  background: #fff;
+  color: var(--ink);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+}
+
+.cia-focus-day {
+  display: grid;
+  gap: 6px;
+  min-width: 240px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.cia-focus-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid #dbeafe;
+  background: #eff6ff;
+  font-size: 13px;
+  font-weight: 600;
+  color: #1d4ed8;
+}
+
+.cia-date-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.cia-date-card {
+  border: 1px solid #e8edf3;
+  border-radius: 12px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.cia-date-card.open {
+  border-color: #93c5fd;
+  box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.1);
+}
+
+.cia-date-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.cia-date-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.cia-date-main strong {
+  display: block;
+  color: var(--ink);
+  font-size: 15px;
+}
+
+.cia-date-main small {
+  display: block;
+  margin-top: 2px;
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.cia-date-meta {
+  display: grid;
+  gap: 2px;
+  text-align: right;
+}
+
+.cia-date-meta small {
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.cia-date-body {
+  padding: 0 16px 16px;
+  border-top: 1px solid #f1f4f8;
+}
+
+.cia-date-driver-block + .cia-date-driver-block {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px dashed #eef2f6;
+}
+
+.cia-date-driver-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
 .message-panel.info {
   border-color: #f5c27a;
   background: #fffaf3;
@@ -523,7 +728,9 @@
 
   .cia-refresh-bar-inner,
   .cia-station-identity-inner,
-  .cia-station-refresh-actions {
+  .cia-period-inner,
+  .cia-station-refresh-actions,
+  .cia-view-toolbar {
     align-items: stretch;
   }
 

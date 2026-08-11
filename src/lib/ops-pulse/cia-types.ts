@@ -98,7 +98,97 @@ export type CiaStationPayload = {
   };
   pendingDrivers: CiaPendingDriver[];
   cached: boolean;
+  availableReportDates?: string[];
 };
+
+export type CiaDateDriverSlice = {
+  driverName: string;
+  amount: number;
+  shipmentCount: number;
+  shipments: CiaPendingShipment[];
+};
+
+export type CiaDateRow = {
+  date: string;
+  displayDate: string;
+  amount: number;
+  driverCount: number;
+  shipmentCount: number;
+  drivers: CiaDateDriverSlice[];
+};
+
+const CIA_DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+/** Friendly label for YYYY-MM-DD (e.g. "10 Aug 2026"). */
+export function formatCiaDisplayDate(value: string | null | undefined) {
+  const raw = String(value ?? "").trim();
+  if (!raw || raw === "unknown") return "Date not recorded";
+  if (!CIA_DATE_RE.test(raw)) return raw;
+  const parsed = new Date(`${raw}T12:00:00+05:30`);
+  if (Number.isNaN(parsed.getTime())) return raw;
+  return parsed.toLocaleDateString("en-IN", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "Asia/Kolkata"
+  });
+}
+
+export function todayIstYmd() {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
+}
+
+export function addDaysYmd(ymd: string, delta: number) {
+  const match = CIA_DATE_RE.exec(ymd);
+  if (!match) return ymd;
+  const date = new Date(`${ymd}T12:00:00+05:30`);
+  date.setUTCDate(date.getUTCDate() + delta);
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(date);
+}
+
+/** Group pending shipments by the day cash was held with the driver. */
+export function buildCiaDateRows(drivers: CiaPendingDriver[]): CiaDateRow[] {
+  const byDate = new Map<string, Map<string, CiaDateDriverSlice>>();
+
+  for (const driver of drivers) {
+    for (const shipment of driver.shipments) {
+      const day = shipment.keptOnDate?.trim() || "unknown";
+      if (!byDate.has(day)) byDate.set(day, new Map());
+      const driverMap = byDate.get(day)!;
+      const key = driver.driverName.trim() || "Unknown driver";
+      if (!driverMap.has(key)) {
+        driverMap.set(key, {
+          driverName: key,
+          amount: 0,
+          shipmentCount: 0,
+          shipments: []
+        });
+      }
+      const slice = driverMap.get(key)!;
+      slice.amount += shipment.pendingAmount;
+      slice.shipmentCount += 1;
+      slice.shipments.push(shipment);
+    }
+  }
+
+  return [...byDate.entries()]
+    .map(([date, driverMap]) => {
+      const dayDrivers = [...driverMap.values()].sort((a, b) => b.amount - a.amount);
+      return {
+        date,
+        displayDate: formatCiaDisplayDate(date),
+        amount: dayDrivers.reduce((sum, row) => sum + row.amount, 0),
+        driverCount: dayDrivers.length,
+        shipmentCount: dayDrivers.reduce((sum, row) => sum + row.shipmentCount, 0),
+        drivers: dayDrivers
+      };
+    })
+    .sort((a, b) => {
+      if (a.date === "unknown") return 1;
+      if (b.date === "unknown") return -1;
+      return b.date.localeCompare(a.date);
+    });
+}
 
 export type CiaSeverity = "critical" | "watch" | "clear" | "error";
 

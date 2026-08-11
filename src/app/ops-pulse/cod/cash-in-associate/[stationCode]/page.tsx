@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { CodSectionTabs } from "@/components/cod-section-tabs";
 import { PageHead } from "@/components/page-head";
 import { requirePagePermission } from "@/lib/authorization";
@@ -7,20 +8,35 @@ import {
   formatDateTime,
   loadCodLocations
 } from "@/lib/ops-pulse/cod";
+import { formatCiaDisplayDate } from "@/lib/ops-pulse/cia-types";
 import { fetchCiaStation, isCashReconWorkerConfigured } from "@/lib/ops-pulse/cash-recon-worker";
-import { CiaDriverPanel, CiaStationRefreshButton } from "../cia-client";
+import { CiaStationRefreshButton } from "../cia-client";
+import { CiaStationDetail } from "../cia-station-detail";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
 
+type SearchParams = {
+  reportDate?: string;
+  view?: string;
+  focusDay?: string;
+};
+
+function validYmd(value: unknown) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(value ?? ""));
+}
+
 export default async function CashInAssociateStationPage(props: {
   params: Promise<{ stationCode?: string; station?: string }>;
+  searchParams?: Promise<SearchParams>;
 }) {
   const authorization = await requirePagePermission("cod_executive_reconciliation", "access");
   const companyId = requireCompanyId(authorization);
   const params = await props.params;
+  const searchParams = await props.searchParams;
   const rawCode = String(params.stationCode ?? params.station ?? "").trim();
   const stationCode = decodeURIComponent(rawCode).trim().toUpperCase();
+  const reportDate = validYmd(searchParams?.reportDate) ? String(searchParams?.reportDate) : "";
 
   let error: string | null = null;
   let payload: Awaited<ReturnType<typeof fetchCiaStation>> | null = null;
@@ -31,7 +47,7 @@ export default async function CashInAssociateStationPage(props: {
     error = "Cash recon worker is not configured. Set CASH_RECON_WORKER_URL and CASH_RECON_ADMIN_KEY.";
   } else {
     try {
-      payload = await fetchCiaStation(stationCode);
+      payload = await fetchCiaStation(stationCode, reportDate ? { asOfDate: reportDate } : undefined);
     } catch (err) {
       error = err instanceof Error ? err.message : `Unable to load Cash In Associate for ${stationCode}.`;
     }
@@ -62,12 +78,12 @@ export default async function CashInAssociateStationPage(props: {
         title={displayCode || "Station"}
         subtitle={
           stationName
-            ? `${stationName}${placeBits ? ` · ${placeBits}` : ""} · Cash In Associate`
-            : "Cash In Associate — pending cash by driver, date, and shipment"
+            ? `${stationName}${placeBits ? ` · ${placeBits}` : ""} · Cash with delivery associates`
+            : "Cash still held with delivery associates — by driver or by day"
         }
         action={
           <span className={`status-pill ${payload ? "good" : "warn"}`}>
-            {payload?.snapshotStatus ? `Snapshot ${payload.snapshotStatus}` : error ? "Unavailable" : "Loading"}
+            {payload ? "Report loaded" : error ? "Unavailable" : "Loading"}
           </span>
         }
       />
@@ -80,8 +96,8 @@ export default async function CashInAssociateStationPage(props: {
             <div>
               <h2>{stationTitle}</h2>
               <p className="subtle">
-                {placeBits || "Station Cash In Associate detail"}
-                {payload?.cached ? " · cached snapshot" : ""}
+                {placeBits || "Station detail"}
+                {payload?.asOfDate ? ` · Report for ${formatCiaDisplayDate(payload.asOfDate)}` : ""}
               </p>
             </div>
           </div>
@@ -92,7 +108,7 @@ export default async function CashInAssociateStationPage(props: {
       {error ? (
         <section className="panel message-panel error">
           <div className="panel-body">
-            <strong>Unable to load {displayCode || "station"}</strong>
+            <strong>Unable to load {displayCode || "this station"}</strong>
             <p className="subtle" style={{ marginTop: 6 }}>{error}</p>
           </div>
         </section>
@@ -102,51 +118,42 @@ export default async function CashInAssociateStationPage(props: {
         <>
           <section className="summary-grid cia-summary-grid">
             <div className="metric-card accent-warn">
-              <span>Cash with associate</span>
+              <span>Cash with drivers</span>
               <strong>₹{formatAmount(summary.pendingLiability)}</strong>
-              <small>{summary.pendingDriverCount} drivers · CIA total ₹{formatAmount(summary.ciaTotal)}</small>
+              <small>{summary.pendingDriverCount} drivers still holding cash</small>
             </div>
             <div className="metric-card">
               <span>Cash at station</span>
               <strong>₹{formatAmount(summary.cashAtStationTotal)}</strong>
-              <small>Ageing total ₹{formatAmount(summary.ageingTotal)}</small>
+              <small>Total ageing cash at station ₹{formatAmount(summary.ageingTotal)}</small>
             </div>
             <div className="metric-card">
-              <span>Deposited</span>
+              <span>Bank deposits</span>
               <strong>₹{formatAmount(summary.depositedTotal)}</strong>
-              <small>Window {payload.window.from} → {payload.window.to}</small>
+              <small>Submitted or created in this period</small>
             </div>
             <div className="metric-card">
-              <span>Difference</span>
+              <span>Gap</span>
               <strong>₹{formatAmount(summary.cashDifference)}</strong>
               <small>{summary.shipmentCount.toLocaleString("en-IN")} ageing shipments</small>
             </div>
           </section>
 
-          <section className="panel cia-run-meta">
-            <div className="panel-body">
-              <div className="cia-run-meta-grid">
-                <div>
-                  <span>Station</span>
-                  <strong>{displayCode}</strong>
-                </div>
-                <div>
-                  <span>As of</span>
-                  <strong>{payload.asOfDate || "—"}</strong>
-                </div>
-                <div>
-                  <span>Snapshot</span>
-                  <strong>{payload.snapshotStatus}</strong>
-                </div>
-                <div>
-                  <span>Fetched</span>
-                  <strong>{payload.fetchedAt ? formatDateTime(payload.fetchedAt) : "—"}</strong>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          <CiaDriverPanel drivers={payload.pendingDrivers} stationCode={displayCode} />
+          <Suspense fallback={
+            <section className="panel">
+              <div className="panel-body subtle">Loading cash breakdown…</div>
+            </section>
+          }>
+            <CiaStationDetail
+              stationCode={displayCode}
+              drivers={payload.pendingDrivers}
+              windowFrom={payload.window.from}
+              windowTo={payload.window.to}
+              reportDate={payload.asOfDate}
+              reportSavedAt={payload.fetchedAt ? formatDateTime(payload.fetchedAt) : null}
+              availableReportDates={payload.availableReportDates ?? []}
+            />
+          </Suspense>
         </>
       ) : null}
     </>

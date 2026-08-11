@@ -648,17 +648,25 @@ export async function fetchCiaNetwork(): Promise<CiaNetworkPayload> {
   };
 }
 
-export async function fetchCiaStation(stationCode: string): Promise<CiaStationPayload> {
+export async function fetchCiaStation(
+  stationCode: string,
+  options?: { asOfDate?: string }
+): Promise<CiaStationPayload> {
   const code = stationCode.trim().toUpperCase();
-  const raw = await getWorker<Record<string, unknown>>("/api/admin/executive/cash-in-associate", {
-    stationCode: code
-  });
+  const asOfDate = String(options?.asOfDate ?? "").trim();
+  const query: Record<string, string> = { stationCode: code };
+  if (asOfDate) query.asOfDate = asOfDate;
+
+  const raw = await getWorker<Record<string, unknown>>("/api/admin/executive/cash-in-associate", query);
   const summaryRaw = raw.summary && typeof raw.summary === "object" ? (raw.summary as Record<string, unknown>) : {};
   const windowRaw = raw.window && typeof raw.window === "object" ? (raw.window as Record<string, unknown>) : {};
   const pendingDrivers = Array.isArray(raw.pendingDrivers)
     ? raw.pendingDrivers
         .map((row) => mapCiaPendingDriver((row ?? {}) as Record<string, unknown>))
         .sort((a, b) => b.amount - a.amount)
+    : [];
+  const availableReportDates = Array.isArray(raw.availableReportDates)
+    ? raw.availableReportDates.map((value) => String(value)).filter(Boolean)
     : [];
 
   return {
@@ -676,7 +684,8 @@ export async function fetchCiaStation(stationCode: string): Promise<CiaStationPa
     fetchedAt: raw.fetchedAt == null ? null : String(raw.fetchedAt),
     summary: mapCiaSummary(summaryRaw),
     pendingDrivers,
-    cached: Boolean(raw.cached)
+    cached: Boolean(raw.cached),
+    availableReportDates
   };
 }
 
