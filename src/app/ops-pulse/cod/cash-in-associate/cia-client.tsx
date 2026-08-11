@@ -42,11 +42,26 @@ async function postCiaRefresh(stationCode?: string) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(stationCode ? { stationCode } : {})
   });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(String(payload?.error ?? payload?.message ?? `Refresh failed (${response.status})`));
+  const contentType = response.headers.get("content-type") ?? "";
+  const text = await response.text();
+  let payload: Record<string, unknown> = {};
+  if (contentType.includes("application/json") || (text && !/^\s*</.test(text))) {
+    try {
+      payload = text ? (JSON.parse(text) as Record<string, unknown>) : {};
+    } catch {
+      payload = {};
+    }
   }
-  return payload as Record<string, unknown>;
+  if (!response.ok) {
+    const raw = String(payload?.error ?? payload?.message ?? "");
+    if (/Worker exceeded resource limits/i.test(raw) || /<!DOCTYPE html/i.test(text) || /^\s*</.test(raw)) {
+      throw new Error(
+        "Cash recon worker hit resource limits. Try again in a minute, or use a shorter date range."
+      );
+    }
+    throw new Error(raw || `Refresh failed (${response.status})`);
+  }
+  return payload;
 }
 
 export function CiaNetworkClient({

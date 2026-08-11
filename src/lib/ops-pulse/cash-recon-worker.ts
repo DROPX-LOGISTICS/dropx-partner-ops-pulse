@@ -35,11 +35,22 @@ async function parseWorkerResponse(response: Response, text: string) {
   }
 
   if (!response.ok) {
+    const htmlish = /^\s*</.test(text) || /<!DOCTYPE html/i.test(text);
+    if (htmlish || /Worker exceeded resource limits/i.test(text) || response.status === 1102) {
+      throw new Error(
+        "Cash recon worker hit Cloudflare resource limits (Error 1102). "
+          + "Try a shorter date range, or refresh again in a minute."
+      );
+    }
     const message = payload && typeof payload === "object" && "message" in payload
       ? String((payload as { message?: unknown }).message)
       : payload && typeof payload === "object" && "error" in payload
         ? String((payload as { error?: unknown }).error)
-        : text || `Cash recon worker returned ${response.status}`;
+        : (text && !htmlish ? text : null) || `Cash recon worker returned ${response.status}`;
+    // Never surface raw HTML/error pages in the UI.
+    if (/^\s*</.test(message) || message.length > 400) {
+      throw new Error(`Cash recon worker returned ${response.status}. Check worker logs.`);
+    }
     throw new Error(message);
   }
 
