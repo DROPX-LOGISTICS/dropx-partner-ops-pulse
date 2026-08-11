@@ -650,12 +650,18 @@ export async function fetchCiaNetwork(): Promise<CiaNetworkPayload> {
 
 export async function fetchCiaStation(
   stationCode: string,
-  options?: { asOfDate?: string }
+  options?: { asOfDate?: string; fromDate?: string; toDate?: string }
 ): Promise<CiaStationPayload> {
   const code = stationCode.trim().toUpperCase();
   const asOfDate = String(options?.asOfDate ?? "").trim();
+  const fromDate = String(options?.fromDate ?? "").trim();
+  const toDate = String(options?.toDate ?? "").trim();
   const query: Record<string, string> = { stationCode: code };
   if (asOfDate) query.asOfDate = asOfDate;
+  if (fromDate && toDate) {
+    query.fromDate = fromDate;
+    query.toDate = toDate;
+  }
 
   const raw = await getWorker<Record<string, unknown>>("/api/admin/executive/cash-in-associate", query);
   const summaryRaw = raw.summary && typeof raw.summary === "object" ? (raw.summary as Record<string, unknown>) : {};

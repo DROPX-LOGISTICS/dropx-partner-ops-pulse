@@ -20,6 +20,8 @@ type SearchParams = {
   reportDate?: string;
   view?: string;
   focusDay?: string;
+  from?: string;
+  to?: string;
 };
 
 function validYmd(value: unknown) {
@@ -37,6 +39,8 @@ export default async function CashInAssociateStationPage(props: {
   const rawCode = String(params.stationCode ?? params.station ?? "").trim();
   const stationCode = decodeURIComponent(rawCode).trim().toUpperCase();
   const reportDate = validYmd(searchParams?.reportDate) ? String(searchParams?.reportDate) : "";
+  const fromDate = validYmd(searchParams?.from) ? String(searchParams?.from) : "";
+  const toDate = validYmd(searchParams?.to) ? String(searchParams?.to) : "";
 
   let error: string | null = null;
   let payload: Awaited<ReturnType<typeof fetchCiaStation>> | null = null;
@@ -47,7 +51,10 @@ export default async function CashInAssociateStationPage(props: {
     error = "Cash recon worker is not configured. Set CASH_RECON_WORKER_URL and CASH_RECON_ADMIN_KEY.";
   } else {
     try {
-      payload = await fetchCiaStation(stationCode, reportDate ? { asOfDate: reportDate } : undefined);
+      payload = await fetchCiaStation(stationCode, {
+        ...(reportDate ? { asOfDate: reportDate } : {}),
+        ...(fromDate && toDate ? { fromDate, toDate } : {})
+      });
     } catch (err) {
       error = err instanceof Error ? err.message : `Unable to load Cash In Associate for ${stationCode}.`;
     }
@@ -97,7 +104,7 @@ export default async function CashInAssociateStationPage(props: {
               <h2>{stationTitle}</h2>
               <p className="subtle">
                 {placeBits || "Station detail"}
-                {payload?.asOfDate ? ` · Report for ${formatCiaDisplayDate(payload.asOfDate)}` : ""}
+                {payload?.asOfDate ? ` · Data fetched for ${formatCiaDisplayDate(payload.asOfDate)}` : ""}
               </p>
             </div>
           </div>

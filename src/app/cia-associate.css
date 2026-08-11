@@ -216,8 +216,28 @@
 
 .cia-period-controls {
   display: grid;
-  gap: 8px;
-  min-width: 220px;
+  gap: 12px;
+  min-width: 320px;
+  flex: 1 1 360px;
+}
+
+.cia-control-card {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #dbe6f3;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.cia-control-card-head {
+  display: grid;
+  gap: 4px;
+}
+
+.cia-control-card-head strong {
+  font-size: 14px;
+  color: var(--ink);
 }
 
 .cia-date-range-fields {

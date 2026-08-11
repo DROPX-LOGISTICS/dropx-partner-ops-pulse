@@ -166,63 +166,76 @@ export function CiaStationDetail({
           </div>
 
           <div className="cia-period-controls">
-            <div className="cia-date-range-fields">
+            <section className="cia-control-card">
+              <div className="cia-control-card-head">
+                <strong>Fetch data for this period</strong>
+                <p className="subtle">Choose the exact date range you want to check for this station.</p>
+              </div>
+              <div className="cia-date-range-fields">
+                <label className="cia-report-date">
+                  <span>From date</span>
+                  <input
+                    type="date"
+                    className="field"
+                    min={windowFrom}
+                    max={toDate || windowTo}
+                    value={fromDate}
+                    disabled={pending}
+                    onChange={(event) => {
+                      const nextFrom = event.target.value || windowFrom;
+                      const safeTo = toDate < nextFrom ? nextFrom : toDate;
+                      setRange(nextFrom, safeTo);
+                    }}
+                  />
+                </label>
+                <label className="cia-report-date">
+                  <span>To date</span>
+                  <input
+                    type="date"
+                    className="field"
+                    min={fromDate || windowFrom}
+                    max={windowTo}
+                    value={toDate}
+                    disabled={pending}
+                    onChange={(event) => {
+                      const nextTo = event.target.value || windowTo;
+                      const safeFrom = fromDate > nextTo ? nextTo : fromDate;
+                      setRange(safeFrom, nextTo);
+                    }}
+                  />
+                </label>
+              </div>
+            </section>
+
+            <section className="cia-control-card">
+              <div className="cia-control-card-head">
+                <strong>Open an older saved report</strong>
+                <p className="subtle">Jump to a saved report date when you want to review an earlier snapshot.</p>
+              </div>
               <label className="cia-report-date">
-                <span>From date</span>
+                <span>Saved report date</span>
                 <input
                   type="date"
                   className="field"
-                  min={windowFrom}
-                  max={toDate || windowTo}
-                  value={fromDate}
+                  min={earliestReport}
+                  max={yesterday}
+                  value={reportDate || yesterday}
+                  list="cia-saved-report-dates"
                   disabled={pending}
-                  onChange={(event) => {
-                    const nextFrom = event.target.value || windowFrom;
-                    const safeTo = toDate < nextFrom ? nextFrom : toDate;
-                    setRange(nextFrom, safeTo);
-                  }}
+                  onChange={(event) => setReportDate(event.target.value)}
                 />
+                <datalist id="cia-saved-report-dates">
+                  {savedDates.map((day) => (
+                    <option key={day} value={day} />
+                  ))}
+                </datalist>
               </label>
-              <label className="cia-report-date">
-                <span>To date</span>
-                <input
-                  type="date"
-                  className="field"
-                  min={fromDate || windowFrom}
-                  max={windowTo}
-                  value={toDate}
-                  disabled={pending}
-                  onChange={(event) => {
-                    const nextTo = event.target.value || windowTo;
-                    const safeFrom = fromDate > nextTo ? nextTo : fromDate;
-                    setRange(safeFrom, nextTo);
-                  }}
-                />
-              </label>
-            </div>
-            <label className="cia-report-date">
-              <span>Open saved report date</span>
-              <input
-                type="date"
-                className="field"
-                min={earliestReport}
-                max={yesterday}
-                value={reportDate || yesterday}
-                list="cia-saved-report-dates"
-                disabled={pending}
-                onChange={(event) => setReportDate(event.target.value)}
-              />
-              <datalist id="cia-saved-report-dates">
-                {savedDates.map((day) => (
-                  <option key={day} value={day} />
-                ))}
-              </datalist>
-            </label>
-            {reportDate && savedDates.length > 0 && !savedDates.includes(reportDate) ? (
-              <p className="cia-period-hint subtle">
-                No saved report for this date yet. Pick a highlighted date or refresh this station.
-              </p>
-            ) : null}
+              {reportDate && savedDates.length > 0 && !savedDates.includes(reportDate) ? (
+                <p className="cia-period-hint subtle">
+                  No saved report for this date yet. Pick a highlighted date or refresh this station.
+                </p>
+              ) : null}
+            </section>
           </div>
         </div>
       </section>
