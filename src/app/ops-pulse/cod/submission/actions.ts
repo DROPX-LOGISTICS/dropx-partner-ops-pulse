@@ -7,27 +7,37 @@ import { redirect } from "next/navigation";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId, withCompany } from "@/lib/company-scope";
 import {
-  clean,
-  clientForFormType,
+  alphaNumericFromForm,
+  alphaNumericRequired,
   dateFromForm,
   depositSlipAttachmentFields,
   inferFormTypeFromLocation,
   numberFromForm,
   required,
+  clientForFormType,
   type CodAttachment,
   type CodLocationRow
 } from "@/lib/ops-pulse/cod";
+import {
+  isCashReconWorkerConfigured,
+  verifyRemittance
+} from "@/lib/ops-pulse/cash-recon-worker";
 import { uploadOpsProof } from "@/lib/ops-pulse/upload";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
-function redirectWithFlash(params: { error?: string; notice?: string }) {
-  (cookies() as unknown as UnsafeUnwrappedCookies).set("dropx_cod_submission_flash", JSON.stringify(params), {
+function redirectWithFlash(params: { error?: string; notice?: string; client?: string }) {
+  // path "/" so flash works on both /cod/* (ops host) and /ops-pulse/cod/* URLs
+  (cookies() as unknown as UnsafeUnwrappedCookies).set("dropx_cod_submission_flash", JSON.stringify({
+    error: params.error,
+    notice: params.notice
+  }), {
     httpOnly: true,
     maxAge: 25,
-    path: "/ops-pulse/cod/submission",
+    path: "/",
     sameSite: "lax"
   });
-  redirect("/ops-pulse/cod/submission");
+  const qs = params.client ? `?client=${encodeURIComponent(params.client)}` : "";
+  redirect(`/ops-pulse/cod/submission${qs}`);
 }
 
 function isNextRedirectError(error: unknown) {
@@ -51,6 +61,7 @@ async function stationDetails(companyId: string, locationId: string) {
 export async function createCodSubmission(formData: FormData) {
   const authorization = await requirePagePermission("cod_submission", "add");
   const companyId = requireCompanyId(authorization);
+  const clientHint = String(formData.get("client") ?? "").trim();
   try {
     if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
     const locationId = required(formData.get("location_id"), "Station");
@@ -60,6 +71,63 @@ export async function createCodSubmission(formData: FormData) {
 
     const station = await stationDetails(companyId, locationId);
     const inferredFormType = inferFormTypeFromLocation(station);
+    const remittanceCode = alphaNumericRequired(formData.get("remittance_code"), "Remittance code").toUpperCase();
+    const submitterName = alphaNumericFromForm(formData.get("submitter_name"), "Submitted by", { required: false });
+    const amount = numberFromForm(formData.get("deposited_amount"), "Deposited amount");
+    const depositDate = dateFromForm(formData.get("deposit_date"), "Deposit date");
+    const codPeriodFrom = dateFromForm(formData.get("cod_period_from"), "COD from date");
+    const codPeriodTo = dateFromForm(formData.get("cod_period_to") || formData.get("cod_period_from"), "COD to date");
+    const remarks = String(formData.get("remarks") ?? "").trim() || null;
+
+    let validationStatus = "Pending";
+    let validationPayload: Record<string, unknown> | null = null;
+    let validatedAmount: number | null = null;
+    let validatedAt: string | null = null;
+
+    if (inferredFormType === "amazon") {
+      if (!isCashReconWorkerConfigured()) {
+        throw new Error("Cash recon worker is not configured. Cannot verify remittance against Amazon portal.");
+      }
+      const stationCode = String(station.station_code ?? "").trim().toUpperCase();
+      if (!stationCode) throw new Error("Selected station is missing a station code.");
+
+      const verify = await verifyRemittance({
+        stationCode,
+        date: depositDate,
+        remittanceCode,
+        amount,
+        fresh: true
+      });
+      validationPayload = {
+        remittance_verify: {
+          verified: verify.verified,
+          codeFound: verify.codeFound,
+          amountMatched: verify.amountMatched,
+          remittanceCode: verify.remittanceCode,
+          amount: verify.amount,
+          matches: verify.matches,
+          nearMisses: verify.nearMisses,
+          checkedAt: new Date().toISOString()
+        }
+      };
+      if (!verify.verified) {
+        if (!verify.codeFound) {
+          throw new Error(
+            `Remittance code ${remittanceCode} was not found on Amazon portal for ${depositDate}. Fix the code or date and try again.`
+          );
+        }
+        const near = verify.nearMisses[0]?.actualAmount;
+        throw new Error(
+          near != null
+            ? `Remittance code found but amount does not match (portal shows ${near}, you entered ${amount}).`
+            : `Remittance code found but amount does not match the portal for ${depositDate}.`
+        );
+      }
+      validationStatus = "Matched";
+      validatedAmount = amount;
+      validatedAt = new Date().toISOString();
+    }
+
     const submissionId = randomUUID();
     const depositAttachments = (await Promise.all(depositSlipAttachmentFields.map(([field, label]) => uploadOpsProof({
       companyId,
@@ -67,12 +135,13 @@ export async function createCodSubmission(formData: FormData) {
       file: formData.get(field),
       label,
       section: "cod-submissions",
-      submissionId
+      submissionId,
+      imagesOnly: true
     })))).filter(Boolean) as CodAttachment[];
 
-    const amount = numberFromForm(formData.get("deposited_amount"), "Deposited amount");
-    const codPeriodFrom = dateFromForm(formData.get("cod_period_from"), "COD from date");
-    const codPeriodTo = dateFromForm(formData.get("cod_period_to") || formData.get("cod_period_from"), "COD to date");
+    if (!depositAttachments.length) {
+      throw new Error("Upload a photo of the deposit slip (JPG or PNG).");
+    }
 
     const { error } = await supabaseAdmin.from("cod_submissions").insert(withCompany({
       id: submissionId,
@@ -83,32 +152,43 @@ export async function createCodSubmission(formData: FormData) {
       cod_period_from: codPeriodFrom,
       cod_period_to: codPeriodTo,
       created_by: authorization.userId,
-      deposit_date: dateFromForm(formData.get("deposit_date"), "Deposit date"),
+      deposit_date: depositDate,
       deposit_slip_attachments: depositAttachments,
       deposited_amount: amount,
       form_type: inferredFormType || null,
       location_id: locationId,
       payment_mode: "CMS / Bank",
-      reference_no: clean(formData.get("remittance_code")),
-      remarks: clean(formData.get("remarks")),
+      reference_no: remittanceCode,
+      remarks,
       remittance_amount: amount,
-      remittance_code: required(formData.get("remittance_code"), "Remittance code"),
+      remittance_code: remittanceCode,
       station_code: station.station_code,
       status: "Submitted",
       submission_no: `COD-${Date.now().toString(36).toUpperCase()}`,
-      submitter_name: clean(formData.get("submitter_name")),
-      validation_status: "Pending",
-      ai_status: depositAttachments.length ? "Queued" : "Awaiting proof",
+      submitter_name: submitterName,
+      validation_status: validationStatus,
+      validated_amount: validatedAmount,
+      validated_at: validatedAt,
+      validation_payload: validationPayload,
+      ai_status: "Not queued",
       ai_summary: null
     }, companyId));
     if (error) throw new Error(error.message);
 
     revalidatePath("/ops-pulse/cod/submission");
-    revalidatePath("/ops-pulse/cod/validation");
     revalidatePath("/ops-pulse/cod/reports");
-    redirectWithFlash({ notice: "COD proof submitted for validation." });
+    const notice = inferredFormType === "amazon"
+      ? "COD submission saved — remittance verified against Amazon portal."
+      : "COD submission saved with deposit slip.";
+    redirectWithFlash({
+      notice,
+      client: clientHint === "amazon" || clientHint === "flipkart" ? clientHint : (inferredFormType || undefined)
+    });
   } catch (error) {
     if (isNextRedirectError(error)) throw error;
-    redirectWithFlash({ error: error instanceof Error ? error.message : "Unable to submit COD proof." });
+    redirectWithFlash({
+      error: error instanceof Error ? error.message : "Unable to submit COD proof.",
+      client: clientHint === "amazon" || clientHint === "flipkart" ? clientHint : undefined
+    });
   }
 }

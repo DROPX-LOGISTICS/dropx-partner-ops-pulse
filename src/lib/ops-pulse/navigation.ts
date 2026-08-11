@@ -45,9 +45,9 @@ const administration: NavItem[] = [
       { code: "cod_master", label: "COD Master", href: "/master/cod-master" },
       { code: "master_locations", label: "Station Master", href: "/master/location" },
       { code: "master_providers", label: "Client / Provider Master", href: "/master/providers" },
-      { code: "master_models", label: "Operation Models", href: "/master/models" }
-      ,{ code: "cod_master", label: "Performance Master", href: "/master/performance-targets" }
-      ,{ code: "cod_master", label: "Capacity Master", href: "/master/capacity" }
+      { code: "master_models", label: "Operation Models", href: "/master/models" },
+      { code: "cod_master", label: "Performance Master", href: "/master/performance-targets" },
+      { code: "cod_master", label: "Capacity Master", href: "/master/capacity" }
     ]
   },
   {
@@ -71,8 +71,7 @@ function modelOperations(mode: OperatingMode): NavItem {
         { code: "ops_pulse", label: "Shift Control", href: "/?view=shift" },
         { code: "ops_pulse", label: "Hourly Performance", href: "/?view=hourly" },
         { code: "daily_submission", label: "Attendance & Reporting", href: "/daily-submission" },
-        { code: "cod_reports", label: "Exceptions", href: "/cod/reports?client=amazon" },
-        { code: "cod_reports", label: "Performance Reports", href: "/reports/amazon" }
+        { code: "cod_reports", label: "Exceptions", href: "/cod/reports?client=amazon" }
       ]
     };
   }
@@ -83,7 +82,6 @@ function modelOperations(mode: OperatingMode): NavItem {
       icon: "O",
       children: [
         { code: "cod_submission", label: "COD Submission", href: "/cod/submission?client=flipkart" },
-        { code: "cod_validation", label: "Deposit Validation", href: "/cod/validation?client=flipkart" },
         { code: "cod_reports", label: "COD Reports", href: "/cod/reports?client=flipkart" }
       ]
     };
@@ -93,13 +91,10 @@ function modelOperations(mode: OperatingMode): NavItem {
     label: "Operations",
     icon: "O",
     children: [
-      { code: "cod_executive_reconciliation", label: "Executive Reconciliation", href: "/cod/executive-reconciliation?client=amazon" },      
+      { code: "cod_executive_reconciliation", label: "Executive Reconciliation", href: "/cod/executive-reconciliation?client=amazon" },
       { code: "cod_submission", label: "COD Submission", href: "/cod/submission?client=amazon" },
-      { code: "cod_validation", label: "Validation & Closure", href: "/cod/validation?client=amazon" },
-      { code: "cod_portal_checks", label: "SCC Portal Checks", href: "/cod/portal-checks" },
       { code: "cod_reports", label: "COD Reports", href: "/cod/reports?client=amazon" },
-      { code: "cod_reports", label: "Performance Reports", href: "/reports/amazon" },
-      { code: "cod_cash_in_associate", label: "Cash In Associate", href: "/cod/cash-in-associate?client=amazon" },
+      { code: "cod_cash_in_associate", label: "Cash In Associate", href: "/cod/cash-in-associate?client=amazon" }
     ]
   };
 }

@@ -46,12 +46,16 @@ async function parseWorkerResponse(response: Response, text: string) {
   return payload;
 }
 
-async function postWorkerOnce<T>(path: string, body: { stationCode: string; date: string }): Promise<T> {
+async function postWorkerOnce<T>(
+  path: string,
+  body: { stationCode: string; date: string } & Record<string, unknown>
+): Promise<T> {
   const { baseUrl, adminKey } = workerConfig();
   if (!baseUrl || !adminKey) {
     throw new Error("Cash recon worker is not configured. Set CASH_RECON_WORKER_URL and CASH_RECON_ADMIN_KEY.");
   }
 
+  const { stationCode, date, ...rest } = body;
   const response = await fetch(`${baseUrl}${path}`, {
     method: "POST",
     headers: {
@@ -59,8 +63,9 @@ async function postWorkerOnce<T>(path: string, body: { stationCode: string; date
       "x-admin-key": adminKey
     },
     body: JSON.stringify({
-      stationCode: body.stationCode.trim().toUpperCase(),
-      date: body.date
+      ...rest,
+      stationCode: String(stationCode).trim().toUpperCase(),
+      date
     }),
     cache: "no-store"
   });
@@ -101,7 +106,10 @@ function isTransientPortalSessionError(message: string) {
     || normalized.includes("not authenticated");
 }
 
-async function postWorker<T>(path: string, body: { stationCode: string; date: string }): Promise<T> {
+async function postWorker<T>(
+  path: string,
+  body: { stationCode: string; date: string } & Record<string, unknown>
+): Promise<T> {
   try {
     return await postWorkerOnce<T>(path, body);
   } catch (error) {
@@ -385,6 +393,95 @@ function mapRemittanceLedger(raw: RawRemittanceSummary["ledger"]): RemittanceSum
         }))
       : []
   }));
+}
+
+export type RemittanceVerifyMatch = {
+  remittanceId: string;
+  remittanceCode: string | null;
+  status: string;
+  actualAmount: number;
+  creationDate: number;
+  submissionDate: number | null;
+};
+
+export type RemittanceVerifyResult = {
+  status: string;
+  stationCode: string;
+  date: string;
+  remittanceCode: string;
+  amount: number;
+  verified: boolean;
+  codeFound: boolean;
+  amountMatched: boolean;
+  matches: RemittanceVerifyMatch[];
+  nearMisses: RemittanceVerifyMatch[];
+  sessionSource: string | null;
+  accountKey: string | null;
+  dateRange: { startTime: number | null; endTime: number | null };
+};
+
+type RawRemittanceVerify = {
+  status?: string;
+  stationCode?: string;
+  date?: string;
+  remittanceCode?: string;
+  amount?: number;
+  verified?: boolean;
+  codeFound?: boolean;
+  amountMatched?: boolean;
+  matches?: RemittanceVerifyMatch[];
+  nearMisses?: RemittanceVerifyMatch[];
+  sessionSource?: string | null;
+  accountKey?: string | null;
+  dateRange?: { startTime?: number; endTime?: number };
+};
+
+export async function verifyRemittance(params: {
+  stationCode: string;
+  date: string;
+  remittanceCode: string;
+  amount: number;
+  fresh?: boolean;
+}): Promise<RemittanceVerifyResult> {
+  const raw = await postWorker<RawRemittanceVerify>("/api/admin/executive/remittance/verify", {
+    stationCode: params.stationCode,
+    date: params.date,
+    remittanceCode: params.remittanceCode,
+    amount: params.amount,
+    fresh: params.fresh === true
+  });
+
+  const mapMatch = (row: RemittanceVerifyMatch | Record<string, unknown>): RemittanceVerifyMatch => ({
+    remittanceId: String((row as RemittanceVerifyMatch).remittanceId ?? ""),
+    remittanceCode: (row as RemittanceVerifyMatch).remittanceCode == null
+      ? null
+      : String((row as RemittanceVerifyMatch).remittanceCode),
+    status: String((row as RemittanceVerifyMatch).status ?? ""),
+    actualAmount: moneyValue((row as RemittanceVerifyMatch).actualAmount as never),
+    creationDate: Number((row as RemittanceVerifyMatch).creationDate ?? 0) || 0,
+    submissionDate: (row as RemittanceVerifyMatch).submissionDate == null
+      ? null
+      : Number((row as RemittanceVerifyMatch).submissionDate) || null
+  });
+
+  return {
+    status: String(raw.status ?? "ok"),
+    stationCode: String(raw.stationCode ?? params.stationCode).toUpperCase(),
+    date: String(raw.date ?? params.date),
+    remittanceCode: String(raw.remittanceCode ?? params.remittanceCode).trim().toUpperCase(),
+    amount: moneyValue(raw.amount as never) || params.amount,
+    verified: Boolean(raw.verified),
+    codeFound: Boolean(raw.codeFound),
+    amountMatched: Boolean(raw.amountMatched),
+    matches: Array.isArray(raw.matches) ? raw.matches.map(mapMatch) : [],
+    nearMisses: Array.isArray(raw.nearMisses) ? raw.nearMisses.map(mapMatch) : [],
+    sessionSource: raw.sessionSource == null ? null : String(raw.sessionSource),
+    accountKey: raw.accountKey == null ? null : String(raw.accountKey),
+    dateRange: {
+      startTime: typeof raw.dateRange?.startTime === "number" ? raw.dateRange.startTime : null,
+      endTime: typeof raw.dateRange?.endTime === "number" ? raw.dateRange.endTime : null
+    }
+  };
 }
 
 export async function fetchRemittance(params: {
