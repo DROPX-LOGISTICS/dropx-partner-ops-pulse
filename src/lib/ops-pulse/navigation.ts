@@ -94,7 +94,8 @@ function modelOperations(mode: OperatingMode): NavItem {
       { code: "cod_executive_reconciliation", label: "Executive Reconciliation", href: "/cod/executive-reconciliation?client=amazon" },
       { code: "cod_submission", label: "COD Submission", href: "/cod/submission?client=amazon" },
       { code: "cod_reports", label: "COD Reports", href: "/cod/reports?client=amazon" },
-      { code: "cod_cash_in_associate", label: "Cash In Associate", href: "/cod/cash-in-associate?client=amazon" }
+      // Same access gate as the CIA page (requirePagePermission executive reconciliation).
+      { code: "cod_reports", label: "Cash In Associate", href: "/cod/cash-in-associate?client=amazon" }
     ]
   };
 }
