@@ -165,12 +165,14 @@ export function CiaStationWorkspace({
           <div className="metric-card accent-warn">
             <span>Cash with drivers</span>
             <strong>₹{formatAmount(summary.pendingLiability)}</strong>
-            <small>{summary.pendingDriverCount} drivers still holding cash</small>
+            <small>{summary.pendingDriverCount} drivers still holding CIA cash</small>
           </div>
           <div className="metric-card">
-            <span>Cash at station</span>
-            <strong>₹{formatAmount(summary.cashAtStationTotal)}</strong>
-            <small>Total ageing cash at station ₹{formatAmount(summary.ageingTotal)}</small>
+            <span>Ageing cash (CIA + station)</span>
+            <strong>₹{formatAmount(summary.ageingTotal)}</strong>
+            <small>
+              CIA ₹{formatAmount(summary.ciaTotal)} · at station ₹{formatAmount(summary.cashAtStationTotal)}
+            </small>
           </div>
           <div className="metric-card">
             <span>Bank deposits</span>
@@ -178,9 +180,9 @@ export function CiaStationWorkspace({
             <small>Submitted or created in this period</small>
           </div>
           <div className="metric-card">
-            <span>Gap</span>
+            <span>Gap (ageing − deposits)</span>
             <strong>₹{formatAmount(summary.cashDifference)}</strong>
-            <small>{summary.shipmentCount.toLocaleString("en-IN")} ageing shipments</small>
+            <small>{summary.shipmentCount.toLocaleString("en-IN")} CASH CIA + station shipments</small>
           </div>
         </section>
       ) : null}

@@ -58,9 +58,11 @@ export default async function CashInAssociateNetworkPage() {
               <small>Cash still with associates · {stationsWithPending} stations</small>
             </div>
             <div className="metric-card">
-              <span>Cash at station</span>
-              <strong>₹{formatAmount(totals.cashAtStationTotal)}</strong>
-              <small>Ageing cash held at station</small>
+              <span>Ageing cash (CIA + station)</span>
+              <strong>₹{formatAmount(totals.ageingTotal)}</strong>
+              <small>
+                CIA ₹{formatAmount(totals.ciaTotal)} · at station ₹{formatAmount(totals.cashAtStationTotal)}
+              </small>
             </div>
             <div className="metric-card">
               <span>Deposited</span>
@@ -70,7 +72,7 @@ export default async function CashInAssociateNetworkPage() {
             <div className="metric-card">
               <span>Ageing − deposited</span>
               <strong>₹{formatAmount(totals.cashDifference)}</strong>
-              <small>{totals.shipmentCount.toLocaleString("en-IN")} ageing shipments</small>
+              <small>{totals.shipmentCount.toLocaleString("en-IN")} CASH CIA + station shipments</small>
             </div>
           </section>
 

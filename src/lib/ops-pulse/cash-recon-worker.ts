@@ -754,14 +754,157 @@ export type CiaNetworkRefreshResult = {
   message: string;
 };
 
-/** Refresh one station synchronously from Amazon portals. */
+const CIA_REFRESH_CHUNK_DAYS = 7;
+
+function addDaysYmdLocal(ymd: string, days: number) {
+  const [y, m, d] = ymd.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() + days);
+  return dt.toISOString().slice(0, 10);
+}
+
+function splitCiaYmdRange(fromDate: string, toDate: string, chunkDays = CIA_REFRESH_CHUNK_DAYS) {
+  if (toDate < fromDate) return [] as Array<{ from: string; to: string }>;
+  const chunks: Array<{ from: string; to: string }> = [];
+  let cursor = fromDate;
+  while (cursor <= toDate) {
+    const chunkTo = addDaysYmdLocal(cursor, chunkDays - 1);
+    const to = chunkTo < toDate ? chunkTo : toDate;
+    chunks.push({ from: cursor, to });
+    cursor = addDaysYmdLocal(to, 1);
+  }
+  return chunks;
+}
+
+function moneySum(values: number[]) {
+  return Math.round(values.reduce((s, n) => s + n, 0) * 100) / 100;
+}
+
+function mergeCiaLiveParts(
+  parts: Array<Record<string, unknown>>,
+  window: { from: string; to: string }
+) {
+  const pendingDriversRaw = parts.flatMap((p) =>
+    Array.isArray(p.pendingDrivers) ? (p.pendingDrivers as Array<Record<string, unknown>>) : []
+  );
+  const byKey = new Map<string, Record<string, unknown>>();
+  for (const driver of pendingDriversRaw) {
+    const tas = String(driver.tasId ?? "").trim().toUpperCase();
+    const emp = String(driver.employeeId ?? "").trim().toUpperCase();
+    const name = String(driver.driverName ?? "").trim().toLowerCase();
+    const key = tas ? `tas:${tas}` : emp ? `emp:${emp}` : `name:${name}`;
+    const current = byKey.get(key);
+    const shipments = Array.isArray(driver.shipments)
+      ? (driver.shipments as Array<Record<string, unknown>>)
+      : [];
+    if (!current) {
+      const shipmentByTracking = new Map<string, Record<string, unknown>>();
+      for (const s of shipments) {
+        const tid = String(s.trackingId ?? "").trim();
+        if (tid) shipmentByTracking.set(tid, s);
+      }
+      byKey.set(key, { ...driver, _shipments: shipmentByTracking });
+      continue;
+    }
+    const map = current._shipments as Map<string, Record<string, unknown>>;
+    for (const s of shipments) {
+      const tid = String(s.trackingId ?? "").trim();
+      if (tid && !map.has(tid)) map.set(tid, s);
+    }
+  }
+
+  const pendingDrivers = [...byKey.values()].map((row) => {
+    const map = row._shipments as Map<string, Record<string, unknown>>;
+    const shipments = [...map.values()];
+    const amount = moneySum(shipments.map((s) => Number(s.pendingAmount ?? 0) || 0));
+    const dates = [...new Set(shipments.map((s) => String(s.keptOnDate ?? "")).filter(Boolean))].sort();
+    return {
+      driverName: String(row.driverName ?? ""),
+      tasId: row.tasId == null ? null : String(row.tasId),
+      employeeId: row.employeeId == null ? null : String(row.employeeId),
+      operationalStatus: row.operationalStatus == null ? null : String(row.operationalStatus),
+      mappedFromWorkforce: Boolean(row.mappedFromWorkforce),
+      amount,
+      shipmentCount: shipments.length,
+      dates,
+      shipments
+    };
+  }).sort((a, b) => b.amount - a.amount);
+
+  const summaries = parts.map((p) =>
+    (p.summary && typeof p.summary === "object" ? p.summary : {}) as Record<string, unknown>
+  );
+  const ageingTotal = moneySum(summaries.map((s) => Number(s.ageingTotal ?? 0) || 0));
+  const depositedTotal = moneySum(summaries.map((s) => Number(s.depositedTotal ?? 0) || 0));
+  const cashDifference = moneySum([ageingTotal - depositedTotal]);
+  const ledger = parts.flatMap((p) => (Array.isArray(p.ledger) ? p.ledger : []));
+
+  return {
+    window,
+    summary: {
+      ciaTotal: moneySum(summaries.map((s) => Number(s.ciaTotal ?? 0) || 0)),
+      cashAtStationTotal: moneySum(summaries.map((s) => Number(s.cashAtStationTotal ?? 0) || 0)),
+      ageingTotal,
+      depositedTotal,
+      pendingLiability: moneySum(summaries.map((s) => Number(s.pendingLiability ?? 0) || 0)),
+      clearedInWindow: moneySum(summaries.map((s) => Number(s.clearedInWindow ?? 0) || 0)),
+      cashDifference,
+      difference: cashDifference,
+      shipmentCount: summaries.reduce((s, row) => s + (Number(row.shipmentCount ?? 0) || 0), 0),
+      pendingDriverCount: pendingDrivers.length,
+      limitedByRemittanceWindow: summaries.some((s) => Boolean(s.limitedByRemittanceWindow)),
+      alignedFromDate: window.from
+    },
+    ledger,
+    pendingDrivers
+  };
+}
+
+function defaultCiaWindow() {
+  // Approximate IST yesterday as UTC+5:30 calendar date.
+  const now = new Date();
+  const ist = new Date(now.getTime() + 5.5 * 60 * 60 * 1000);
+  const toDate = new Date(Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate() - 1));
+  const to = toDate.toISOString().slice(0, 10);
+  const from = addDaysYmdLocal(to, -(31 - 1));
+  return { from, to };
+}
+
+/**
+ * Refresh one station by loading live-range chunks (each stays under CF limits),
+ * merging on the BFF, then saving the snapshot on the worker.
+ */
 export async function refreshCiaStation(stationCode: string): Promise<CiaStationRefreshResult> {
   const code = stationCode.trim().toUpperCase();
+
+  let window = defaultCiaWindow();
+  try {
+    const network = await fetchCiaNetwork();
+    if (network.window?.from && network.window?.to) {
+      window = { from: network.window.from, to: network.window.to };
+    }
+  } catch {
+    /* use default 31-day window */
+  }
+
+  const chunks = splitCiaYmdRange(window.from, window.to, CIA_REFRESH_CHUNK_DAYS);
+  const parts: Array<Record<string, unknown>> = [];
+  for (const chunk of chunks) {
+    const raw = await getWorker<Record<string, unknown>>("/api/admin/executive/cash-in-associate", {
+      stationCode: code,
+      fromDate: chunk.from,
+      toDate: chunk.to
+    });
+    parts.push(raw);
+  }
+
+  const precomputedPayload = mergeCiaLiveParts(parts, window);
   const raw = await postWorkerJsonOnce<Record<string, unknown>>(
     "/api/admin/executive/cash-in-associate/refresh",
-    { stationCode: code },
+    { stationCode: code, precomputedPayload },
     { stationCode: code }
   );
+
   return {
     status: String(raw.status ?? "ok"),
     stationCode: String(raw.stationCode ?? code).toUpperCase(),
