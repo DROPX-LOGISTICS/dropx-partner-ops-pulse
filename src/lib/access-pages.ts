@@ -1,3 +1,4 @@
+import { randomUUID } from "crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 export const accessPages = [
@@ -319,13 +320,13 @@ export async function ensureAccessPages(supabase: SupabaseClient, companyId: str
     ((currentPages ?? []) as CurrentPage[]).map((page) => [page.code, page])
   );
 
-  const toInsert: Array<(typeof accessPages)[number] & { company_id: string; is_active: boolean; updated_at: string }> = [];
+  const toInsert: Array<(typeof accessPages)[number] & { id: string; company_id: string; is_active: boolean; updated_at: string }> = [];
   const toUpdate: Array<{ id: string; code: string; name: string; sort_order: number }> = [];
 
   for (const page of accessPages) {
     const existing = currentPageByCode.get(page.code);
     if (!existing) {
-      toInsert.push({ company_id: companyId, ...page, is_active: true, updated_at: now });
+      toInsert.push({ id: randomUUID(), company_id: companyId, ...page, is_active: true, updated_at: now });
       continue;
     }
     const needsUpdate =
@@ -441,6 +442,7 @@ export async function ensureAccessPages(supabase: SupabaseClient, companyId: str
 
   if (!locationRole) {
     const { error: createLocationRoleError } = await supabase.from("user_roles").insert({
+      id: randomUUID(),
       company_id: companyId,
       code: "LOCATION",
       name: "Location",
