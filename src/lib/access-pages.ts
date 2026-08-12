@@ -396,6 +396,14 @@ export async function ensureAccessPages(supabase: SupabaseClient, companyId: str
   if (toInsert.length || toUpdate.length) {
     // Migrations only needed when catalog changed; skip the expensive legacy copies on hot paths.
     await mergeRetiredPagePermissions(supabase, companyId, "onboarding", "delivery_associates");
+    await copyLegacyGroupPermissions(supabase, companyId, "cod", [
+      "cod_executive_reconciliation",
+      "cod_submission",
+      "cod_validation",
+      "cod_reports",
+      "cod_portal_checks",
+      "cod_cash_in_associate"
+    ], false);
     await copyLegacyGroupPermissions(supabase, companyId, "settings", [
       "master_locations",
       "master_providers",

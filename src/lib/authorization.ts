@@ -34,7 +34,7 @@ const noPermission: PagePermission = { canView: false, canAdd: false, canEdit: f
 const groupedParentPermissions: Record<string, string[]> = {
   leads: ["leads_dashboard", "leads_all", "leads_followups", "leads_interviews", "leads_reports", "leads_ads", "leads_sop"],
   fleet: ["fleet_action_center", "fleet_vehicle_view", "fleet_date_view", "fleet_station_view", "fleet_tracking", "fleet_fuel_log", "fleet_live_gps", "fleet_maintenance", "fleet_reports"],
-  ops_pulse: ["daily_submission", "cod", "cod_executive_reconciliation", "cod_submission", "cod_validation", "cod_reports", "cod_portal_checks"],
+  ops_pulse: ["daily_submission", "cod", "cod_executive_reconciliation", "cod_submission", "cod_validation", "cod_reports", "cod_portal_checks", "cod_cash_in_associate"],
   cps: ["cps_overview", "cps_daily", "cps_monthly", "cps_cost_breakup", "cps_stations", "cps_shipments", "cps_associates", "cps_reports", "cps_inputs", "cps_unmapped"],
   reports: ["attendance_reports", "verification_api_reports"],
   master_data: ["master_locations", "master_providers", "master_models", "payment_methods", "master_payment_banks", "master_payment_heads", "designations", "biometric_devices", "cod_master", "master_documents"],
@@ -97,7 +97,7 @@ function inheritPeopleReviewPermissions(permissions: Record<string, PagePermissi
 }
 
 async function ensureMissingCurrentAccessPages(companyId: string) {
-  const requiredCodes = ["people_review", "payments", "expense_requests", "payment_requests", "payment_approvals", "payment_process", "payment_reports", "master_payment_banks", "master_payment_heads", "payment_settings", "imports", "ops_pulse", "daily_submission", "cod", "cod_executive_reconciliation", "cod_submission", "cod_validation", "cod_reports", "cod_portal_checks", "cod_master", "biometric_devices", "reports", "attendance_reports", "verification_api_reports", "ai_connector", "amazon_connector", "developer_mode", "cps", "cps_overview", "cps_daily", "cps_monthly", "cps_cost_breakup", "cps_stations", "cps_shipments", "cps_associates", "cps_reports", "cps_inputs", "cps_unmapped"];
+  const requiredCodes = ["people_review", "payments", "expense_requests", "payment_requests", "payment_approvals", "payment_process", "payment_reports", "master_payment_banks", "master_payment_heads", "payment_settings", "imports", "ops_pulse", "daily_submission", "cod", "cod_executive_reconciliation", "cod_submission", "cod_validation", "cod_reports", "cod_portal_checks", "cod_cash_in_associate", "cod_master", "biometric_devices", "reports", "attendance_reports", "verification_api_reports", "ai_connector", "amazon_connector", "developer_mode", "cps", "cps_overview", "cps_daily", "cps_monthly", "cps_cost_breakup", "cps_stations", "cps_shipments", "cps_associates", "cps_reports", "cps_inputs", "cps_unmapped"];
   const { data, error } = await supabaseAdmin!
     .from("app_pages")
     .select("code")
