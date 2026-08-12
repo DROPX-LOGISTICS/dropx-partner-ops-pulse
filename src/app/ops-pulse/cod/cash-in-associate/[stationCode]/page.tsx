@@ -6,6 +6,7 @@ import { requireCompanyId } from "@/lib/company-scope";
 import { loadCodLocations } from "@/lib/ops-pulse/cod";
 import { fetchCiaStation, isCashReconWorkerConfigured } from "@/lib/ops-pulse/cash-recon-worker";
 import { CiaStationWorkspace } from "../cia-station-workspace";
+import { CiaSubTabs } from "../cia-subtabs";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -71,6 +72,7 @@ export default async function CashInAssociateStationPage(props: {
         }
       />
       <CodSectionTabs active="cash-in-associate" />
+      <CiaSubTabs active="stations" />
 
       <Suspense
         fallback={

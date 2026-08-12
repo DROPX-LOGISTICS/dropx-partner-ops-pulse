@@ -13,7 +13,7 @@ import {
   type RemittanceRowNormalized,
   type RemittanceSummaryNormalized
 } from "@/lib/ops-pulse/cash-recon-types";
-import type { CiaNetworkPayload, CiaPendingDriver, CiaStationPayload, CiaStationRow } from "@/lib/ops-pulse/cia-types";
+import type { CiaDailyLedgerPayload, CiaNetworkPayload, CiaPendingDriver, CiaStationPayload, CiaStationRow } from "@/lib/ops-pulse/cia-types";
 
 function workerConfig() {
   const baseUrl = (process.env.CASH_RECON_WORKER_URL || process.env.NEXT_PUBLIC_CASH_RECON_WORKER_URL || "").trim().replace(/\/$/, "");
@@ -653,8 +653,92 @@ export async function fetchCiaNetwork(): Promise<CiaNetworkPayload> {
           stationsFailed: Number(runRaw.stationsFailed ?? 0) || 0
         }
       : null,
+    refreshProgress: (() => {
+      const progressRaw =
+        raw.refreshProgress && typeof raw.refreshProgress === "object"
+          ? (raw.refreshProgress as Record<string, unknown>)
+          : null;
+      if (!progressRaw) return null;
+      return {
+        id: String(progressRaw.id ?? ""),
+        status: String(progressRaw.status ?? "running"),
+        stationsTotal: Number(progressRaw.stationsTotal ?? 0) || 0,
+        stationsOk: Number(progressRaw.stationsOk ?? 0) || 0,
+        stationsFailed: Number(progressRaw.stationsFailed ?? 0) || 0
+      };
+    })(),
     totals: mapCiaSummary(totalsRaw),
     stations,
+    cached: Boolean(raw.cached),
+    runSource: raw.runSource == null ? undefined : String(raw.runSource)
+  };
+}
+
+export async function fetchCiaDailyLedger(options?: { date?: string }): Promise<CiaDailyLedgerPayload> {
+  const date = String(options?.date ?? "").trim();
+  const query: Record<string, string> = {};
+  if (date) query.date = date;
+  const raw = await getWorker<Record<string, unknown>>(
+    "/api/admin/executive/cash-in-associate/daily-ledger",
+    query
+  );
+  const windowRaw = raw.window && typeof raw.window === "object" ? (raw.window as Record<string, unknown>) : {};
+  const totalsRaw = raw.totals && typeof raw.totals === "object" ? (raw.totals as Record<string, unknown>) : {};
+  const runRaw = raw.run && typeof raw.run === "object" ? (raw.run as Record<string, unknown>) : null;
+
+  const days = Array.isArray(raw.days)
+    ? raw.days.map((row) => {
+        const day = (row ?? {}) as Record<string, unknown>;
+        return {
+          date: String(day.date ?? ""),
+          cashWithAssociate: moneyValue(day.cashWithAssociate as never),
+          deposited: moneyValue(day.deposited as never),
+          pending: moneyValue(day.pending as never),
+          forwarded: moneyValue(day.forwarded as never),
+          stationCount: Number(day.stationCount ?? 0) || 0
+        };
+      })
+    : [];
+
+  const stationDays = Array.isArray(raw.stationDays)
+    ? raw.stationDays.map((row) => {
+        const day = (row ?? {}) as Record<string, unknown>;
+        return {
+          stationCode: String(day.stationCode ?? "").toUpperCase(),
+          date: String(day.date ?? ""),
+          cashWithAssociate: moneyValue(day.cashWithAssociate as never),
+          deposited: moneyValue(day.deposited as never),
+          pending: moneyValue(day.pending as never),
+          forwarded: moneyValue(day.forwarded as never)
+        };
+      })
+    : [];
+
+  return {
+    status: String(raw.status ?? "ok"),
+    asOfDate: String(raw.asOfDate ?? ""),
+    window: {
+      from: String(windowRaw.from ?? ""),
+      to: String(windowRaw.to ?? "")
+    },
+    selectedDate: raw.selectedDate == null ? null : String(raw.selectedDate),
+    runSource: raw.runSource == null ? undefined : String(raw.runSource),
+    run: runRaw
+      ? {
+          id: String(runRaw.id ?? ""),
+          status: String(runRaw.status ?? ""),
+          stationsTotal: Number(runRaw.stationsTotal ?? 0) || 0,
+          stationsOk: Number(runRaw.stationsOk ?? 0) || 0
+        }
+      : null,
+    totals: {
+      cashWithAssociate: moneyValue(totalsRaw.cashWithAssociate as never),
+      deposited: moneyValue(totalsRaw.deposited as never),
+      pending: moneyValue(totalsRaw.pending as never),
+      forwarded: moneyValue(totalsRaw.forwarded as never)
+    },
+    days,
+    stationDays,
     cached: Boolean(raw.cached)
   };
 }

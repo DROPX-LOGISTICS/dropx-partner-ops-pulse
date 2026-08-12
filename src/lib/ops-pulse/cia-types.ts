@@ -47,6 +47,55 @@ export type CiaNetworkPayload = {
   };
   stations: CiaStationRow[];
   cached: boolean;
+  runSource?: "running" | "completed" | string;
+  refreshProgress?: {
+    id: string;
+    status: string;
+    stationsTotal: number;
+    stationsOk: number;
+    stationsFailed: number;
+  } | null;
+};
+
+export type CiaDailyLedgerStationDay = {
+  stationCode: string;
+  date: string;
+  cashWithAssociate: number;
+  deposited: number;
+  pending: number;
+  forwarded: number;
+};
+
+export type CiaDailyLedgerDay = {
+  date: string;
+  cashWithAssociate: number;
+  deposited: number;
+  pending: number;
+  forwarded: number;
+  stationCount: number;
+};
+
+export type CiaDailyLedgerPayload = {
+  status: string;
+  asOfDate: string;
+  window: { from: string; to: string };
+  selectedDate: string | null;
+  runSource?: string;
+  run: {
+    id: string;
+    status: string;
+    stationsTotal: number;
+    stationsOk: number;
+  } | null;
+  totals: {
+    cashWithAssociate: number;
+    deposited: number;
+    pending: number;
+    forwarded: number;
+  };
+  days: CiaDailyLedgerDay[];
+  stationDays: CiaDailyLedgerStationDay[];
+  cached: boolean;
 };
 
 export type CiaPendingShipment = {

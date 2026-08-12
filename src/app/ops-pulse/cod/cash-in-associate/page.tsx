@@ -4,6 +4,7 @@ import { requirePagePermission } from "@/lib/authorization";
 import { formatAmount, formatDateTime } from "@/lib/ops-pulse/cod";
 import { fetchCiaNetwork, isCashReconWorkerConfigured } from "@/lib/ops-pulse/cash-recon-worker";
 import { CiaNetworkClient } from "./cia-client";
+import { CiaSubTabs } from "./cia-subtabs";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -26,20 +27,30 @@ export default async function CashInAssociateNetworkPage() {
 
   const totals = payload?.totals;
   const stationsWithPending = payload?.stations.filter((s) => s.pendingLiability > 0).length ?? 0;
+  const refresh = payload?.refreshProgress;
+  const refreshActive = Boolean(refresh && refresh.status === "running");
 
   return (
     <>
       <PageHead
         eyebrow="Ops Pulse · Manager analysis"
         title="Cash In Associate"
-        subtitle="Network view of cash with associates, cash at station, ageing totals, and bank deposits across stations."
+        subtitle="Cash still with delivery associates across stations — plus deposits and day-wise ledger."
         action={
           <span className={`status-pill ${payload ? "good" : "warn"}`}>
-            {payload?.run?.status ? `Snapshot ${payload.run.status}` : error ? "Unavailable" : "Loading"}
+            {refreshActive
+              ? `Refresh ${refresh?.stationsOk ?? 0}/${refresh?.stationsTotal ?? "…"}`
+              : payload?.run?.status
+                ? `Report ${payload.run.status}`
+                : error
+                  ? "Unavailable"
+                  : "Loading"}
           </span>
         }
       />
       <CodSectionTabs active="cash-in-associate" />
+      <CiaSubTabs active="stations" />
+
       {error ? (
         <section className="panel message-panel error">
           <div className="panel-body">
@@ -49,30 +60,41 @@ export default async function CashInAssociateNetworkPage() {
         </section>
       ) : null}
 
+      {refreshActive ? (
+        <section className="panel message-panel info">
+          <div className="panel-body">
+            <strong>Full refresh in progress</strong>
+            <p className="subtle" style={{ marginTop: 6 }}>
+              {refresh?.stationsOk ?? 0} of {refresh?.stationsTotal ?? 0} stations updated so far.
+              This page keeps showing the last full network report while new stations finish
+              (about one every 3 minutes). Click Update numbers to see progress.
+            </p>
+          </div>
+        </section>
+      ) : null}
+
       {payload && totals ? (
         <>
           <section className="summary-grid cia-summary-grid">
-            <div className="metric-card">
-              <span>Pending liability</span>
+            <div className="metric-card accent-warn">
+              <span>Cash with associates</span>
               <strong>₹{formatAmount(totals.pendingLiability)}</strong>
-              <small>Cash still with associates · {stationsWithPending} stations</small>
+              <small>Still pending · {stationsWithPending} stations · CIA total ₹{formatAmount(totals.ciaTotal)}</small>
             </div>
             <div className="metric-card">
-              <span>Ageing cash (CIA + station)</span>
-              <strong>₹{formatAmount(totals.ageingTotal)}</strong>
-              <small>
-                CIA ₹{formatAmount(totals.ciaTotal)} · at station ₹{formatAmount(totals.cashAtStationTotal)}
-              </small>
+              <span>CIA cash (ageing)</span>
+              <strong>₹{formatAmount(totals.ciaTotal)}</strong>
+              <small>Cash In Associate only (not cash at station)</small>
             </div>
             <div className="metric-card">
-              <span>Deposited</span>
+              <span>Bank deposits</span>
               <strong>₹{formatAmount(totals.depositedTotal)}</strong>
-              <small>CREATED + SUBMITTED remittances</small>
+              <small>Created / submitted in this period</small>
             </div>
             <div className="metric-card">
-              <span>Ageing − deposited</span>
-              <strong>₹{formatAmount(totals.cashDifference)}</strong>
-              <small>{totals.shipmentCount.toLocaleString("en-IN")} CASH CIA + station shipments</small>
+              <span>Cleared in window</span>
+              <strong>₹{formatAmount(totals.clearedInWindow)}</strong>
+              <small>{totals.pendingDriverCount} drivers still holding cash</small>
             </div>
           </section>
 
@@ -84,10 +106,10 @@ export default async function CashInAssociateNetworkPage() {
                   <strong>{payload.asOfDate || "—"}</strong>
                 </div>
                 <div>
-                  <span>Stations</span>
+                  <span>Stations shown</span>
                   <strong>
-                    {payload.run?.stationsOk ?? payload.stations.length}
-                    /{payload.run?.stationsTotal ?? payload.stations.length} ok
+                    {payload.stations.length}
+                    /{payload.run?.stationsTotal ?? payload.stations.length}
                   </strong>
                 </div>
                 <div>
@@ -95,8 +117,8 @@ export default async function CashInAssociateNetworkPage() {
                   <strong>{payload.run?.finishedAt ? formatDateTime(payload.run.finishedAt) : "—"}</strong>
                 </div>
                 <div>
-                  <span>Pending drivers</span>
-                  <strong>{totals.pendingDriverCount}</strong>
+                  <span>Cash at station</span>
+                  <strong>₹{formatAmount(totals.cashAtStationTotal)}</strong>
                 </div>
               </div>
             </div>
@@ -107,7 +129,7 @@ export default async function CashInAssociateNetworkPage() {
             asOfDate={payload.asOfDate}
             windowFrom={payload.window.from}
             windowTo={payload.window.to}
-            runStatus={payload.run?.status ?? null}
+            runStatus={refreshActive ? "running" : payload.run?.status ?? null}
           />
         </>
       ) : null}

@@ -172,9 +172,43 @@
   color: #b54708;
 }
 
-.cia-station-detail {
+.cia-subtabs {
+  margin-top: 4px;
+}
+
+.cia-daily-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: end;
+}
+
+.cia-daily-toolbar label {
   display: grid;
-  gap: 14px;
+  gap: 6px;
+  min-width: 180px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.cia-daily-window {
+  margin: 0 0 2px;
+  align-self: center;
+}
+
+.cia-linkish {
+  border: 0;
+  background: transparent;
+  color: var(--brand-dark);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0;
+}
+
+.cia-linkish:hover {
+  text-decoration: underline;
 }
 
 .cia-period-panel {
