@@ -4,7 +4,6 @@ import { requirePagePermission } from "@/lib/authorization";
 import { formatAmount, formatDateTime } from "@/lib/ops-pulse/cod";
 import { fetchCiaNetwork, isCashReconWorkerConfigured } from "@/lib/ops-pulse/cash-recon-worker";
 import { CiaNetworkClient } from "./cia-client";
-import { CiaSubTabs } from "./cia-subtabs";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -35,7 +34,7 @@ export default async function CashInAssociateNetworkPage() {
       <PageHead
         eyebrow="Ops Pulse · Manager analysis"
         title="Cash In Associate"
-        subtitle="Cash still with delivery associates across stations — plus deposits and day-wise ledger."
+        subtitle="Cash still with delivery associates across stations. Open a station for driver detail and day-wise ledger."
         action={
           <span className={`status-pill ${payload ? "good" : "warn"}`}>
             {refreshActive
@@ -49,7 +48,6 @@ export default async function CashInAssociateNetworkPage() {
         }
       />
       <CodSectionTabs active="cash-in-associate" />
-      <CiaSubTabs active="stations" />
 
       {error ? (
         <section className="panel message-panel error">

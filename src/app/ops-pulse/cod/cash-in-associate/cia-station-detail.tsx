@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { CalendarDays, ChevronDown, ChevronRight, Loader2, Search, Users } from "lucide-react";
+import { CalendarDays, ChevronDown, ChevronRight, Loader2, Search, Users, BookOpen } from "lucide-react";
 import { formatAmount } from "@/lib/ops-pulse/cod";
 import {
   addDaysYmd,
@@ -10,12 +10,13 @@ import {
   formatCiaDisplayDate,
   todayIstYmd,
   type CiaDateRow,
-  type CiaPendingDriver
+  type CiaPendingDriver,
+  type CiaStationLedgerDay
 } from "@/lib/ops-pulse/cia-types";
 
 const PAGE_SIZE = 12;
 const MAX_LOOKBACK_DAYS = 90;
-type DetailView = "driver" | "date";
+type DetailView = "driver" | "date" | "ledger";
 
 function moneyClass(value: number) {
   if (value > 1) return "cia-money positive";
@@ -52,15 +53,22 @@ function buildStationHref(
   return query ? `${pathname}?${query}` : pathname;
 }
 
+function parseDetailView(value: string | null): DetailView {
+  if (value === "date" || value === "ledger") return value;
+  return "driver";
+}
+
 export function CiaStationDetail({
   stationCode,
   drivers,
+  ledger,
   windowFrom,
   windowTo,
   reportSavedAt
 }: {
   stationCode: string;
   drivers: CiaPendingDriver[];
+  ledger: CiaStationLedgerDay[];
   windowFrom: string;
   windowTo: string;
   reportDate: string;
@@ -75,7 +83,7 @@ export function CiaStationDetail({
   const yesterday = addDaysYmd(todayIstYmd(), -1);
   const earliestAllowed = addDaysYmd(yesterday, -(MAX_LOOKBACK_DAYS - 1));
 
-  const view: DetailView = searchParams.get("view") === "date" ? "date" : "driver";
+  const view = parseDetailView(searchParams.get("view"));
   const focusDay = searchParams.get("focusDay")?.trim() ?? "";
   const hasExplicitRange = validYmd(searchParams.get("from")) && validYmd(searchParams.get("to"));
   const appliedFrom = hasExplicitRange
@@ -126,7 +134,10 @@ export function CiaStationDetail({
   }
 
   function setView(nextView: DetailView) {
-    navigate({ view: nextView, focusDay: nextView === "date" ? focusDay || undefined : null });
+    navigate({
+      view: nextView,
+      focusDay: nextView === "date" ? focusDay || undefined : null
+    });
   }
 
   function setFocusDay(day: string) {
@@ -274,6 +285,16 @@ export function CiaStationDetail({
               <CalendarDays size={16} aria-hidden />
               By date
             </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={view === "ledger"}
+              className={`cia-view-tab${view === "ledger" ? " active" : ""}`}
+              onClick={() => setView("ledger")}
+            >
+              <BookOpen size={16} aria-hidden />
+              Day-wise ledger
+            </button>
           </div>
           {view === "date" ? (
             <label className="cia-focus-day">
@@ -298,13 +319,15 @@ export function CiaStationDetail({
 
       {view === "driver" ? (
         <CiaDriverView stationCode={stationCode} drivers={drivers} />
-      ) : (
+      ) : view === "date" ? (
         <CiaDateView
           stationCode={stationCode}
           rows={filteredDateRows}
           focusDay={focusDay}
           onClearFocus={() => setFocusDay("")}
         />
+      ) : (
+        <CiaStationLedgerView stationCode={stationCode} rows={ledger} />
       )}
     </div>
   );
@@ -576,6 +599,138 @@ function CiaDateView({
               </article>
             );
           })}
+        </div>
+
+        {totalPages > 1 ? (
+          <div className="cia-pagination">
+            <button type="button" className="pager-button" disabled={safePage <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>Previous</button>
+            <span className="subtle">Page {safePage} of {totalPages}</span>
+            <button type="button" className="pager-button" disabled={safePage >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))}>Next</button>
+          </div>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
+function CiaStationLedgerView({
+  stationCode,
+  rows
+}: {
+  stationCode: string;
+  rows: CiaStationLedgerDay[];
+}) {
+  const [query, setQuery] = useState("");
+  const [page, setPage] = useState(1);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter((row) => formatCiaDisplayDate(row.date).toLowerCase().includes(q) || row.date.includes(q));
+  }, [rows, query]);
+
+  const totals = useMemo(
+    () => ({
+      cash: filtered.reduce((sum, row) => sum + row.expectedCashTotal, 0),
+      deposited: filtered.reduce((sum, row) => sum + row.remittanceTotalCash, 0),
+      pending: filtered.reduce((sum, row) => sum + row.stillPendingAmount, 0),
+      forwarded: filtered.reduce((sum, row) => sum + row.forwardedAmount, 0)
+    }),
+    [filtered]
+  );
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+  const pageRows = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+
+  return (
+    <section className="panel">
+      <div className="panel-head">
+        <div>
+          <h2>{stationCode} · Day-wise ledger</h2>
+          <p className="subtle">
+            Cash collected vs bank deposits for each day at this station. Newest days first.
+          </p>
+        </div>
+        <span className="count-badge">₹{formatAmount(totals.pending)} pending</span>
+      </div>
+      <div className="panel-body">
+        <section className="summary-grid cia-summary-grid" style={{ marginBottom: 16 }}>
+          <div className="metric-card accent-warn">
+            <span>Cash (ageing)</span>
+            <strong>₹{formatAmount(totals.cash)}</strong>
+            <small>Expected CIA + station cash in this period</small>
+          </div>
+          <div className="metric-card">
+            <span>Bank deposits</span>
+            <strong>₹{formatAmount(totals.deposited)}</strong>
+            <small>Created / submitted that day</small>
+          </div>
+          <div className="metric-card">
+            <span>Still pending</span>
+            <strong>₹{formatAmount(totals.pending)}</strong>
+            <small>Not matched to a deposit yet</small>
+          </div>
+          <div className="metric-card">
+            <span>Cleared later</span>
+            <strong>₹{formatAmount(totals.forwarded)}</strong>
+            <small>Held that day, deposited later</small>
+          </div>
+        </section>
+
+        <div className="cia-toolbar">
+          <label className="cia-search">
+            <Search size={16} aria-hidden />
+            <input
+              className="field"
+              placeholder="Search by date…"
+              value={query}
+              onChange={(event) => {
+                setQuery(event.target.value);
+                setPage(1);
+              }}
+            />
+          </label>
+        </div>
+
+        <div className="table-wrap">
+          <table className="cia-table">
+            <thead>
+              <tr>
+                <th>Day</th>
+                <th className="num">Cash</th>
+                <th className="num">Deposited</th>
+                <th className="num">Still pending</th>
+                <th className="num">Cleared later</th>
+                <th className="num">Same-day clear</th>
+                <th className="num">Drivers</th>
+              </tr>
+            </thead>
+            <tbody>
+              {pageRows.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="subtle">No day-wise ledger rows for this period.</td>
+                </tr>
+              ) : (
+                pageRows.map((row) => (
+                  <tr key={row.date}>
+                    <td>
+                      <strong>{formatCiaDisplayDate(row.date)}</strong>
+                      <small style={{ display: "block" }}>{row.date}</small>
+                    </td>
+                    <td className="num">{formatAmount(row.expectedCashTotal)}</td>
+                    <td className="num">{formatAmount(row.remittanceTotalCash)}</td>
+                    <td className={`num ${moneyClass(row.stillPendingAmount)}`}>
+                      {formatAmount(row.stillPendingAmount)}
+                    </td>
+                    <td className="num">{formatAmount(row.forwardedAmount)}</td>
+                    <td className="num">{formatAmount(row.clearedSameDayAmount)}</td>
+                    <td className="num">{row.driverCount}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
         </div>
 
         {totalPages > 1 ? (

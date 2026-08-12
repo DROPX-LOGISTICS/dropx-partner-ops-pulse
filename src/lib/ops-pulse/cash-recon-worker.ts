@@ -769,6 +769,22 @@ export async function fetchCiaStation(
   const availableReportDates = Array.isArray(raw.availableReportDates)
     ? raw.availableReportDates.map((value) => String(value)).filter(Boolean)
     : [];
+  const ledger = Array.isArray(raw.ledger)
+    ? (raw.ledger as Array<Record<string, unknown>>)
+        .map((day) => ({
+          date: String(day?.date ?? "").trim(),
+          expectedCashTotal: moneyValue(day?.expectedCashTotal as never),
+          remittanceTotalCash: moneyValue(day?.remittanceTotalCash as never),
+          shortAmount: moneyValue(day?.shortAmount as never),
+          stillPendingAmount: moneyValue(day?.stillPendingAmount as never),
+          forwardedAmount: moneyValue(day?.forwardedAmount as never),
+          clearedSameDayAmount: moneyValue(day?.clearedSameDayAmount as never),
+          clearedFromPriorAmount: moneyValue(day?.clearedFromPriorAmount as never),
+          driverCount: Array.isArray(day?.drivers) ? day.drivers.length : 0
+        }))
+        .filter((day) => Boolean(day.date))
+        .sort((a, b) => b.date.localeCompare(a.date))
+    : [];
 
   return {
     status: String(raw.status ?? "ok"),
@@ -785,6 +801,7 @@ export async function fetchCiaStation(
     fetchedAt: raw.fetchedAt == null ? null : String(raw.fetchedAt),
     summary: mapCiaSummary(summaryRaw),
     pendingDrivers,
+    ledger,
     cached: Boolean(raw.cached),
     availableReportDates
   };

@@ -122,6 +122,18 @@ export type CiaPendingDriver = {
   shipments: CiaPendingShipment[];
 };
 
+export type CiaStationLedgerDay = {
+  date: string;
+  expectedCashTotal: number;
+  remittanceTotalCash: number;
+  shortAmount: number;
+  stillPendingAmount: number;
+  forwardedAmount: number;
+  clearedSameDayAmount: number;
+  clearedFromPriorAmount: number;
+  driverCount: number;
+};
+
 export type CiaStationPayload = {
   status: string;
   asOfDate: string;
@@ -146,6 +158,7 @@ export type CiaStationPayload = {
     limitedByRemittanceWindow: boolean;
   };
   pendingDrivers: CiaPendingDriver[];
+  ledger: CiaStationLedgerDay[];
   cached: boolean;
   availableReportDates?: string[];
 };

@@ -109,6 +109,9 @@ export function CiaStationWorkspace({
   const drivers: CiaPendingDriver[] = (liveRange ? livePayload : initialPayload)?.pendingDrivers
     ?? initialPayload?.pendingDrivers
     ?? [];
+  const ledger = (liveRange ? livePayload : initialPayload)?.ledger
+    ?? initialPayload?.ledger
+    ?? [];
   const displayCode = String(
     (livePayload ?? initialPayload)?.stationCode || stationCode || ""
   ).trim().toUpperCase();
@@ -198,6 +201,7 @@ export function CiaStationWorkspace({
           <CiaStationDetail
             stationCode={displayCode}
             drivers={drivers}
+            ledger={ledger}
             windowFrom={windowFrom || fromDate}
             windowTo={windowTo || toDate}
             reportDate={(livePayload ?? initialPayload)?.asOfDate ?? ""}
