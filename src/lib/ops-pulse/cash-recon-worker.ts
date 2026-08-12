@@ -662,6 +662,10 @@ export async function fetchCiaNetwork(): Promise<CiaNetworkPayload> {
       return {
         id: String(progressRaw.id ?? ""),
         status: String(progressRaw.status ?? "running"),
+        asOfDate: progressRaw.asOfDate == null ? undefined : String(progressRaw.asOfDate),
+        windowFrom: progressRaw.windowFrom == null ? undefined : String(progressRaw.windowFrom),
+        windowTo: progressRaw.windowTo == null ? undefined : String(progressRaw.windowTo),
+        startedAt: progressRaw.startedAt == null ? null : String(progressRaw.startedAt),
         stationsTotal: Number(progressRaw.stationsTotal ?? 0) || 0,
         stationsOk: Number(progressRaw.stationsOk ?? 0) || 0,
         stationsFailed: Number(progressRaw.stationsFailed ?? 0) || 0
@@ -773,6 +777,7 @@ export async function fetchCiaStation(
     ? (raw.ledger as Array<Record<string, unknown>>)
         .map((day) => ({
           date: String(day?.date ?? "").trim(),
+          carryForwardIn: moneyValue(day?.carryForwardIn as never),
           expectedCashTotal: moneyValue(day?.expectedCashTotal as never),
           remittanceTotalCash: moneyValue(day?.remittanceTotalCash as never),
           shortAmount: moneyValue(day?.shortAmount as never),

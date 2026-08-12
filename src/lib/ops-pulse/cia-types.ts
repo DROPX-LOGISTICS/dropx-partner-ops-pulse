@@ -51,6 +51,10 @@ export type CiaNetworkPayload = {
   refreshProgress?: {
     id: string;
     status: string;
+    asOfDate?: string;
+    windowFrom?: string;
+    windowTo?: string;
+    startedAt?: string | null;
     stationsTotal: number;
     stationsOk: number;
     stationsFailed: number;
@@ -124,6 +128,7 @@ export type CiaPendingDriver = {
 
 export type CiaStationLedgerDay = {
   date: string;
+  carryForwardIn: number;
   expectedCashTotal: number;
   remittanceTotalCash: number;
   shortAmount: number;

@@ -75,24 +75,26 @@ export default async function CashInAssociateNetworkPage() {
         <>
           <section className="summary-grid cia-summary-grid">
             <div className="metric-card accent-warn">
-              <span>Cash with associates</span>
+              <span>Cash with drivers</span>
               <strong>₹{formatAmount(totals.pendingLiability)}</strong>
-              <small>Still pending · {stationsWithPending} stations · CIA total ₹{formatAmount(totals.ciaTotal)}</small>
+              <small>{totals.pendingDriverCount} drivers still holding CIA cash</small>
             </div>
             <div className="metric-card">
-              <span>CIA cash (ageing)</span>
-              <strong>₹{formatAmount(totals.ciaTotal)}</strong>
-              <small>Cash In Associate only (not cash at station)</small>
+              <span>Ageing cash (CIA + station)</span>
+              <strong>₹{formatAmount(totals.ageingTotal)}</strong>
+              <small>
+                CIA ₹{formatAmount(totals.ciaTotal)} · at station ₹{formatAmount(totals.cashAtStationTotal)}
+              </small>
             </div>
             <div className="metric-card">
               <span>Bank deposits</span>
               <strong>₹{formatAmount(totals.depositedTotal)}</strong>
-              <small>Created / submitted in this period</small>
+              <small>Submitted or created in this period</small>
             </div>
             <div className="metric-card">
-              <span>Cleared in window</span>
-              <strong>₹{formatAmount(totals.clearedInWindow)}</strong>
-              <small>{totals.pendingDriverCount} drivers still holding cash</small>
+              <span>Gap (ageing − deposits)</span>
+              <strong>₹{formatAmount(totals.cashDifference)}</strong>
+              <small>{totals.shipmentCount.toLocaleString("en-IN")} CASH CIA + station shipments</small>
             </div>
           </section>
 
@@ -111,8 +113,14 @@ export default async function CashInAssociateNetworkPage() {
                   </strong>
                 </div>
                 <div>
-                  <span>Fetched</span>
-                  <strong>{payload.run?.finishedAt ? formatDateTime(payload.run.finishedAt) : "—"}</strong>
+                  <span>{refreshActive ? "Refresh started" : "Fetched"}</span>
+                  <strong>
+                    {refreshActive && refresh?.startedAt
+                      ? formatDateTime(refresh.startedAt)
+                      : payload.run?.finishedAt
+                        ? formatDateTime(payload.run.finishedAt)
+                        : "—"}
+                  </strong>
                 </div>
                 <div>
                   <span>Cash at station</span>

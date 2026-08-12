@@ -631,7 +631,7 @@ function CiaStationLedgerView({
 
   const totals = useMemo(
     () => ({
-      cash: filtered.reduce((sum, row) => sum + row.expectedCashTotal, 0),
+      cash: filtered.reduce((sum, row) => sum + row.carryForwardIn + row.expectedCashTotal, 0),
       deposited: filtered.reduce((sum, row) => sum + row.remittanceTotalCash, 0),
       pending: filtered.reduce((sum, row) => sum + row.stillPendingAmount, 0),
       forwarded: filtered.reduce((sum, row) => sum + row.forwardedAmount, 0)
@@ -649,7 +649,7 @@ function CiaStationLedgerView({
         <div>
           <h2>{stationCode} · Day-wise ledger</h2>
           <p className="subtle">
-            Cash collected vs bank deposits for each day at this station. Newest days first.
+            Total cash position vs bank deposits for each day at this station. Newest days first.
           </p>
         </div>
         <span className="count-badge">₹{formatAmount(totals.pending)} pending</span>
@@ -659,7 +659,7 @@ function CiaStationLedgerView({
           <div className="metric-card accent-warn">
             <span>Cash (ageing)</span>
             <strong>₹{formatAmount(totals.cash)}</strong>
-            <small>Expected CIA + station cash in this period</small>
+              <small>Carry-forward cash + that day's cash</small>
           </div>
           <div className="metric-card">
             <span>Bank deposits</span>
@@ -718,7 +718,14 @@ function CiaStationLedgerView({
                       <strong>{formatCiaDisplayDate(row.date)}</strong>
                       <small style={{ display: "block" }}>{row.date}</small>
                     </td>
-                    <td className="num">{formatAmount(row.expectedCashTotal)}</td>
+                    <td className="num">
+                      <strong>{formatAmount(row.carryForwardIn + row.expectedCashTotal)}</strong>
+                      <small style={{ display: "block" }}>
+                        {row.carryForwardIn > 0
+                          ? `Carry ₹${formatAmount(row.carryForwardIn)} + day ₹${formatAmount(row.expectedCashTotal)}`
+                          : `Day ₹${formatAmount(row.expectedCashTotal)}`}
+                      </small>
+                    </td>
                     <td className="num">{formatAmount(row.remittanceTotalCash)}</td>
                     <td className={`num ${moneyClass(row.stillPendingAmount)}`}>
                       {formatAmount(row.stillPendingAmount)}
