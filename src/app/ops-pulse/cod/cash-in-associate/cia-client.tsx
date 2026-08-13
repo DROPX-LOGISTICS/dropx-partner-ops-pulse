@@ -479,7 +479,7 @@ export function CiaNetworkClient({
                 return (
                   <tr key={row.stationCode} className={`cia-row severity-${row.severity}${isRowRefreshing ? " is-refreshing" : ""}`}>
                     <td>
-                      <Link className="cia-station-link" href={`/cod/cash-in-associate/${encodeURIComponent(row.stationCode)}`}>
+                      <Link className="cia-station-link" href={`/cod/cash-in-associate/${encodeURIComponent(row.stationCode)}`} prefetch={false}>
                         <strong>{row.stationCode}</strong>
                         <small>{row.accountKey && row.accountKey !== "default" ? row.accountKey : "default account"}</small>
                       </Link>
@@ -505,7 +505,7 @@ export function CiaNetworkClient({
                           {isRowRefreshing ? <Loader2 size={15} className="cia-spin" /> : <RefreshCw size={15} />}
                           <span>{isRowRefreshing ? "Refreshing…" : "Refresh"}</span>
                         </button>
-                        <Link className="button secondary cia-open-btn" href={`/cod/cash-in-associate/${encodeURIComponent(row.stationCode)}`}>
+                        <Link className="button secondary cia-open-btn" href={`/cod/cash-in-associate/${encodeURIComponent(row.stationCode)}`} prefetch={false}>
                           Open
                         </Link>
                       </div>
