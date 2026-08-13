@@ -862,7 +862,50 @@ export type CiaNetworkRefreshResult = {
   } | null;
   message: string;
   processedStation?: string | null;
+  refreshProgress?: Record<string, unknown> | null;
 };
+
+function parseWorkerRefreshProgress(raw: unknown): Record<string, unknown> | null {
+  if (!raw || typeof raw !== "object") return null;
+  return raw as Record<string, unknown>;
+}
+
+function parseWorkerRun(runRaw: unknown): CiaNetworkRefreshResult["run"] {
+  if (!runRaw || typeof runRaw !== "object") return null;
+  const row = runRaw as Record<string, unknown>;
+  return {
+    id: String(row.id ?? ""),
+    status: String(row.status ?? "running"),
+    stationsTotal: Number(row.stationsTotal ?? 0) || 0,
+    stationsOk: Number(row.stationsOk ?? 0) || 0,
+    stationsFailed: Number(row.stationsFailed ?? 0) || 0
+  };
+}
+
+async function peekNextCiaStation(runId?: string): Promise<{
+  stationCode: string | null;
+  done: boolean;
+  run: CiaNetworkRefreshResult["run"];
+  window: { from: string; to: string } | null;
+  refreshProgress: Record<string, unknown> | null;
+}> {
+  const raw = await getWorker<Record<string, unknown>>(
+    "/api/admin/internal/cia-snapshot/next-station",
+    runId ? { runId } : undefined
+  );
+  const windowRaw = raw.window && typeof raw.window === "object"
+    ? (raw.window as Record<string, unknown>)
+    : null;
+  return {
+    stationCode: raw.stationCode == null ? null : String(raw.stationCode).trim().toUpperCase() || null,
+    done: Boolean(raw.done),
+    run: parseWorkerRun(raw.run),
+    window: windowRaw?.from && windowRaw?.to
+      ? { from: String(windowRaw.from), to: String(windowRaw.to) }
+      : null,
+    refreshProgress: parseWorkerRefreshProgress(raw.refreshProgress)
+  };
+}
 
 const CIA_REFRESH_CHUNK_DAYS = 7;
 
@@ -984,17 +1027,22 @@ function defaultCiaWindow() {
  * Refresh one station by loading live-range chunks (each stays under CF limits),
  * merging on the BFF, then saving the snapshot on the worker.
  */
-export async function refreshCiaStation(stationCode: string): Promise<CiaStationRefreshResult> {
+export async function refreshCiaStation(
+  stationCode: string,
+  windowOverride?: { from: string; to: string }
+): Promise<CiaStationRefreshResult> {
   const code = stationCode.trim().toUpperCase();
 
-  let window = defaultCiaWindow();
-  try {
-    const network = await fetchCiaNetwork();
-    if (network.window?.from && network.window?.to) {
-      window = { from: network.window.from, to: network.window.to };
+  let window = windowOverride ?? defaultCiaWindow();
+  if (!windowOverride) {
+    try {
+      const network = await fetchCiaNetwork();
+      if (network.window?.from && network.window?.to) {
+        window = { from: network.window.from, to: network.window.to };
+      }
+    } catch {
+      /* use default 31-day window */
     }
-  } catch {
-    /* use default 31-day window */
   }
 
   const chunks = splitCiaYmdRange(window.from, window.to, CIA_REFRESH_CHUNK_DAYS);
@@ -1024,31 +1072,58 @@ export async function refreshCiaStation(stationCode: string): Promise<CiaStation
   };
 }
 
-/** Start/resume full network snapshot (ticker processes one station every ~3 min). */
+/**
+ * Start a fresh network snapshot, then fetch the first station via the same
+ * chunked BFF path as row Refresh (avoids worker nested self-fetch failures).
+ */
 export async function refreshCiaNetwork(): Promise<CiaNetworkRefreshResult> {
   const raw = await postWorkerJsonOnce<Record<string, unknown>>(
     "/api/admin/executive/cash-in-associate/refresh",
-    {}
+    { skipFirstTick: true }
   );
-  const runRaw = raw.run && typeof raw.run === "object" ? (raw.run as Record<string, unknown>) : null;
+  const resumed = Boolean(raw.resumed);
+  let run = parseWorkerRun(raw.run);
+  let refreshProgress = parseWorkerRefreshProgress(raw.refreshProgress);
+  let processedStation: string | null = null;
+  let message = String(raw.message ?? "Snapshot run started.");
+
+  const peek = await peekNextCiaStation(run?.id || undefined);
+  if (peek.stationCode && !peek.done) {
+    const refreshed = await refreshCiaStation(
+      peek.stationCode,
+      peek.window ?? undefined
+    );
+    if (refreshed.snapshotStatus !== "ok") {
+      throw new Error(refreshed.error || `Failed to refresh ${peek.stationCode}`);
+    }
+    processedStation = refreshed.stationCode;
+    const after = await peekNextCiaStation(run?.id || refreshed.runId || undefined);
+    run = after.run ?? run;
+    refreshProgress = after.refreshProgress ?? refreshProgress;
+    const attempted = Number(refreshProgress?.stationsOk ?? 0) || 0;
+    const total = Number(refreshProgress?.stationsTotal ?? run?.stationsTotal ?? 0) || 0;
+    message = `Fresh snapshot run started; processed ${processedStation} (${attempted}/${total}). `
+      + "Click Update numbers to advance the next station.";
+  } else {
+    run = peek.run ?? run;
+    refreshProgress = peek.refreshProgress ?? refreshProgress;
+  }
+
   return {
     status: String(raw.status ?? "accepted"),
-    resumed: Boolean(raw.resumed),
-    run: runRaw
-      ? {
-          id: String(runRaw.id ?? ""),
-          status: String(runRaw.status ?? "running"),
-          stationsTotal: Number(runRaw.stationsTotal ?? 0) || 0,
-          stationsOk: Number(runRaw.stationsOk ?? 0) || 0,
-          stationsFailed: Number(runRaw.stationsFailed ?? 0) || 0
-        }
-      : null,
-    message: String(raw.message ?? "Snapshot run started."),
-    processedStation: raw.processedStation == null ? null : String(raw.processedStation)
+    resumed,
+    run,
+    message,
+    processedStation,
+    refreshProgress
   };
 }
 
-/** Advance the active CIA network run by one station (same work as the ticker cron). */
+/**
+ * Advance the active CIA network run by one station using the BFF chunked
+ * refresh path (same as the row Refresh button). Do not call the worker's
+ * nested self-fetch continue tick — that path often queues retries.
+ */
 export async function continueCiaSnapshot(runId?: string): Promise<{
   status: string;
   processedStation: string | null;
@@ -1060,24 +1135,30 @@ export async function continueCiaSnapshot(runId?: string): Promise<{
     stationsOk: number;
     stationsFailed: number;
   } | null;
+  refreshProgress?: Record<string, unknown> | null;
 }> {
-  const raw = await postWorkerJsonOnce<Record<string, unknown>>(
-    "/api/admin/internal/cia-snapshot/continue",
-    runId ? { runId } : {}
-  );
-  const runRaw = raw.run && typeof raw.run === "object" ? (raw.run as Record<string, unknown>) : null;
+  const peek = await peekNextCiaStation(runId);
+  if (peek.done || !peek.stationCode) {
+    return {
+      status: "ok",
+      processedStation: null,
+      done: true,
+      run: peek.run,
+      refreshProgress: peek.refreshProgress
+    };
+  }
+
+  const refreshed = await refreshCiaStation(peek.stationCode, peek.window ?? undefined);
+  if (refreshed.snapshotStatus !== "ok") {
+    throw new Error(refreshed.error || `Failed to refresh ${peek.stationCode}`);
+  }
+
+  const after = await peekNextCiaStation(runId || refreshed.runId || undefined);
   return {
-    status: String(raw.status ?? "ok"),
-    processedStation: raw.processedStation == null ? null : String(raw.processedStation),
-    done: Boolean(raw.done),
-    run: runRaw
-      ? {
-          id: String(runRaw.id ?? ""),
-          status: String(runRaw.status ?? "running"),
-          stationsTotal: Number(runRaw.stationsTotal ?? 0) || 0,
-          stationsOk: Number(runRaw.stationsOk ?? 0) || 0,
-          stationsFailed: Number(runRaw.stationsFailed ?? 0) || 0
-        }
-      : null
+    status: "ok",
+    processedStation: refreshed.stationCode,
+    done: after.done,
+    run: after.run ?? peek.run,
+    refreshProgress: after.refreshProgress ?? peek.refreshProgress
   };
 }

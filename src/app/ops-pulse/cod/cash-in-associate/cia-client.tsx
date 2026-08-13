@@ -223,7 +223,7 @@ export function CiaNetworkClient({
           ? "All stations in this run are finished. Reloading numbers…"
           : station
             ? `${station} was fetched just now. Reloading page numbers…`
-            : "Refresh is still running, but this tick did not finish a station (another tick may own it, or the worker hit limits). Try again in a minute."
+            : "Refresh is still running, but no station was advanced this time. Try Update numbers again."
       });
       startTransition(() => router.refresh());
     } catch (error) {
@@ -241,9 +241,9 @@ export function CiaNetworkClient({
     if (busy) return;
     const confirmed = window.confirm(
       "Refresh Cash In Associate for all stations?\n\n"
-      + "This starts a fresh network run (clears the previous retry queue) and fetches the first station now. "
-      + "More stations update one at a time (about every 3 minutes — roughly 2 hours for the full network). "
-      + "You can keep using this page; click “Update numbers” to fetch the next station immediately."
+      +       "This starts a fresh network run (clears the previous retry queue) and fetches the first station now. "
+      + "More stations update when you click “Update numbers” (about 1–2 minutes per station). "
+      + "You can keep using this page between stations."
     );
     if (!confirmed) return;
 
@@ -303,7 +303,7 @@ export function CiaNetworkClient({
                   + ((progress.stationsProcessing ?? 0) > 0 ? `, ${progress.stationsProcessing} in flight` : "")
                   + ")"
                 : ""}.
-              Click Update numbers to fetch the next station now, or wait for the 3-minute ticker.
+              Click Update numbers to fetch the next station (same path as row Refresh).
             </p>
           </div>
         </section>
