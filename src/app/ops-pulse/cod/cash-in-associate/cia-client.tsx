@@ -2,14 +2,20 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { ChevronDown, ChevronRight, Loader2, RefreshCw, Search } from "lucide-react";
 import { formatAmount } from "@/lib/ops-pulse/cod";
-import { ciaSeverity, ciaSeverityLabel, type CiaStationRow } from "@/lib/ops-pulse/cia-types";
+import {
+  ciaSeverity,
+  ciaSeverityLabel,
+  type CiaNetworkPayload,
+  type CiaStationRow
+} from "@/lib/ops-pulse/cia-types";
 
 const PAGE_SIZE = 12;
 
 type SortKey = "pendingLiability" | "cashAtStationTotal" | "depositedTotal" | "cashDifference" | "stationCode";
+type RefreshProgress = NonNullable<CiaNetworkPayload["refreshProgress"]>;
 
 function moneyClass(value: number) {
   if (value > 1) return "cia-money positive";
@@ -34,6 +40,27 @@ function formatRunStatus(status: string | null | undefined) {
     queued: "Queued"
   };
   return labels[raw] ?? raw.replace(/_/g, " ");
+}
+
+function parseRefreshProgress(raw: unknown): RefreshProgress | null {
+  if (!raw || typeof raw !== "object") return null;
+  const row = raw as Record<string, unknown>;
+  const stationsTotal = Number(row.stationsTotal ?? 0) || 0;
+  if (!stationsTotal && !row.id) return null;
+  return {
+    id: String(row.id ?? ""),
+    status: String(row.status ?? "running"),
+    asOfDate: row.asOfDate == null ? undefined : String(row.asOfDate),
+    windowFrom: row.windowFrom == null ? undefined : String(row.windowFrom),
+    windowTo: row.windowTo == null ? undefined : String(row.windowTo),
+    startedAt: row.startedAt == null ? null : String(row.startedAt),
+    stationsTotal,
+    stationsOk: Number(row.stationsOk ?? 0) || 0,
+    stationsSucceeded: Number(row.stationsSucceeded ?? 0) || 0,
+    stationsFailed: Number(row.stationsFailed ?? 0) || 0,
+    stationsRetryQueued: Number(row.stationsRetryQueued ?? 0) || 0,
+    stationsProcessing: Number(row.stationsProcessing ?? 0) || 0
+  };
 }
 
 async function postCiaRefresh(stationCode?: string) {
@@ -81,13 +108,15 @@ export function CiaNetworkClient({
   asOfDate,
   windowFrom,
   windowTo,
-  runStatus
+  runStatus,
+  initialRefreshProgress = null
 }: {
   stations: CiaStationRow[];
   asOfDate: string;
   windowFrom: string;
   windowTo: string;
   runStatus?: string | null;
+  initialRefreshProgress?: RefreshProgress | null;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -98,8 +127,17 @@ export function CiaNetworkClient({
   const [refreshingStation, setRefreshingStation] = useState<string | null>(null);
   const [refreshingAll, setRefreshingAll] = useState(false);
   const [notice, setNotice] = useState<RefreshNotice | null>(null);
+  const [liveProgress, setLiveProgress] = useState<RefreshProgress | null>(initialRefreshProgress);
+
+  useEffect(() => {
+    setLiveProgress(initialRefreshProgress);
+  }, [initialRefreshProgress]);
 
   const busy = refreshingAll || refreshingStation !== null || pending;
+  const progress = liveProgress;
+  const refreshActive = Boolean(progress && progress.status === "running")
+    || String(runStatus ?? "").trim() === "running";
+  const effectiveRunStatus = refreshActive ? "running" : (runStatus ?? null);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -161,7 +199,7 @@ export function CiaNetworkClient({
   async function handleUpdateNumbers() {
     if (busy) return;
     setNotice(null);
-    const refreshRunning = String(runStatus ?? "").trim() === "running";
+    const refreshRunning = refreshActive;
     if (!refreshRunning) {
       startTransition(() => router.refresh());
       return;
@@ -170,6 +208,8 @@ export function CiaNetworkClient({
     setRefreshingAll(true);
     try {
       const result = await postCiaContinue();
+      const nextProgress = parseRefreshProgress(result.refreshProgress);
+      if (nextProgress) setLiveProgress(nextProgress);
       const station = result.processedStation ? String(result.processedStation) : null;
       const done = Boolean(result.done);
       setNotice({
@@ -201,7 +241,7 @@ export function CiaNetworkClient({
     if (busy) return;
     const confirmed = window.confirm(
       "Refresh Cash In Associate for all stations?\n\n"
-      + "This starts a background run and fetches the first station now. "
+      + "This starts a fresh network run (clears the previous retry queue) and fetches the first station now. "
       + "More stations update one at a time (about every 3 minutes — roughly 2 hours for the full network). "
       + "You can keep using this page; click “Update numbers” to fetch the next station immediately."
     );
@@ -211,21 +251,24 @@ export function CiaNetworkClient({
     setRefreshingAll(true);
     try {
       const result = await postCiaRefresh();
+      const nextProgress = parseRefreshProgress(result.refreshProgress);
+      if (nextProgress) setLiveProgress(nextProgress);
       const run = result.run && typeof result.run === "object" ? (result.run as Record<string, unknown>) : null;
-      const resumed = Boolean(result.resumed);
-      const done = Number(run?.stationsOk ?? 0);
-      const total = Number(run?.stationsTotal ?? stations.length) || stations.length;
+      const attempted = nextProgress?.stationsOk
+        ?? Number(run?.stationsOk ?? 0);
+      const total = nextProgress?.stationsTotal
+        ?? Number(run?.stationsTotal ?? stations.length)
+        ?? stations.length;
       const firstStation = result.processedStation ? String(result.processedStation) : null;
+      const succeeded = nextProgress?.stationsSucceeded ?? 0;
       setNotice({
         kind: "info",
-        title: resumed ? "Network refresh continued" : "Network refresh started",
+        title: "Fresh network refresh started",
         detail: firstStation
-          ? `Processed ${firstStation} immediately (${done}/${total}). `
-            + "More stations continue about every 3 minutes — click “Update numbers” to advance one now."
-          : run
-            ? `${done} of ${total} stations finished so far. `
-              + "Click “Update numbers” to fetch the next station if progress stays stuck."
-            : String(result.message ?? "Network refresh accepted.")
+          ? `Processed ${firstStation}. Progress is now ${attempted}/${total}`
+            + (succeeded > 0 ? ` (${succeeded} ok)` : "")
+            + ". Click “Update numbers” to advance the next station."
+          : `New run started at ${attempted}/${total}. Click “Update numbers” to fetch the next station.`
       });
       startTransition(() => router.refresh());
     } catch (error) {
@@ -239,10 +282,33 @@ export function CiaNetworkClient({
     }
   }
 
-  const statusLabel = formatRunStatus(runStatus);
+  const statusLabel = formatRunStatus(effectiveRunStatus);
 
   return (
     <div className="cia-network">
+      {refreshActive && progress ? (
+        <section className="panel message-panel info">
+          <div className="panel-body">
+            <strong>
+              Full refresh in progress · {progress.stationsOk}/{progress.stationsTotal}
+            </strong>
+            <p className="subtle" style={{ marginTop: 6 }}>
+              {progress.stationsOk} of {progress.stationsTotal} stations attempted so far
+              {(progress.stationsSucceeded ?? 0) > 0
+                || (progress.stationsFailed ?? 0) > 0
+                || (progress.stationsRetryQueued ?? 0) > 0
+                ? ` (${progress.stationsSucceeded ?? 0} ok`
+                  + ((progress.stationsFailed ?? 0) > 0 ? `, ${progress.stationsFailed} failed` : "")
+                  + ((progress.stationsRetryQueued ?? 0) > 0 ? `, ${progress.stationsRetryQueued} queued to retry` : "")
+                  + ((progress.stationsProcessing ?? 0) > 0 ? `, ${progress.stationsProcessing} in flight` : "")
+                  + ")"
+                : ""}.
+              Click Update numbers to fetch the next station now, or wait for the 3-minute ticker.
+            </p>
+          </div>
+        </section>
+      ) : null}
+
       <section className="panel cia-refresh-bar">
         <div className="panel-body cia-refresh-bar-inner">
           <div>
