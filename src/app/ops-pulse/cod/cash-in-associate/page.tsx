@@ -63,9 +63,15 @@ export default async function CashInAssociateNetworkPage() {
           <div className="panel-body">
             <strong>Full refresh in progress</strong>
             <p className="subtle" style={{ marginTop: 6 }}>
-              {refresh?.stationsOk ?? 0} of {refresh?.stationsTotal ?? 0} stations updated so far.
+              {refresh?.stationsOk ?? 0} of {refresh?.stationsTotal ?? 0} stations attempted so far
+              {(refresh?.stationsSucceeded ?? 0) > 0 || (refresh?.stationsFailed ?? 0) > 0
+                ? ` (${refresh?.stationsSucceeded ?? 0} ok`
+                  + ((refresh?.stationsFailed ?? 0) > 0 ? `, ${refresh?.stationsFailed} failed` : "")
+                  + ((refresh?.stationsRetryQueued ?? 0) > 0 ? `, ${refresh?.stationsRetryQueued} queued to retry` : "")
+                  + ")"
+                : ""}.
               This page keeps showing the last full network report while new stations finish
-              (about one every 3 minutes). Click Update numbers to see progress.
+              (about one every 3 minutes). Click Update numbers to fetch the next station now.
             </p>
           </div>
         </section>

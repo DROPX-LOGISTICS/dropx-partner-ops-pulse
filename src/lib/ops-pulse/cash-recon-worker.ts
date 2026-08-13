@@ -668,7 +668,10 @@ export async function fetchCiaNetwork(): Promise<CiaNetworkPayload> {
         startedAt: progressRaw.startedAt == null ? null : String(progressRaw.startedAt),
         stationsTotal: Number(progressRaw.stationsTotal ?? 0) || 0,
         stationsOk: Number(progressRaw.stationsOk ?? 0) || 0,
-        stationsFailed: Number(progressRaw.stationsFailed ?? 0) || 0
+        stationsSucceeded: Number(progressRaw.stationsSucceeded ?? progressRaw.stationsOk ?? 0) || 0,
+        stationsFailed: Number(progressRaw.stationsFailed ?? 0) || 0,
+        stationsRetryQueued: Number(progressRaw.stationsRetryQueued ?? 0) || 0,
+        stationsProcessing: Number(progressRaw.stationsProcessing ?? 0) || 0
       };
     })(),
     totals: mapCiaSummary(totalsRaw),
@@ -858,6 +861,7 @@ export type CiaNetworkRefreshResult = {
     stationsFailed: number;
   } | null;
   message: string;
+  processedStation?: string | null;
 };
 
 const CIA_REFRESH_CHUNK_DAYS = 7;
@@ -1039,6 +1043,41 @@ export async function refreshCiaNetwork(): Promise<CiaNetworkRefreshResult> {
           stationsFailed: Number(runRaw.stationsFailed ?? 0) || 0
         }
       : null,
-    message: String(raw.message ?? "Snapshot run started.")
+    message: String(raw.message ?? "Snapshot run started."),
+    processedStation: raw.processedStation == null ? null : String(raw.processedStation)
+  };
+}
+
+/** Advance the active CIA network run by one station (same work as the ticker cron). */
+export async function continueCiaSnapshot(runId?: string): Promise<{
+  status: string;
+  processedStation: string | null;
+  done: boolean;
+  run: {
+    id: string;
+    status: string;
+    stationsTotal: number;
+    stationsOk: number;
+    stationsFailed: number;
+  } | null;
+}> {
+  const raw = await postWorkerJsonOnce<Record<string, unknown>>(
+    "/api/admin/internal/cia-snapshot/continue",
+    runId ? { runId } : {}
+  );
+  const runRaw = raw.run && typeof raw.run === "object" ? (raw.run as Record<string, unknown>) : null;
+  return {
+    status: String(raw.status ?? "ok"),
+    processedStation: raw.processedStation == null ? null : String(raw.processedStation),
+    done: Boolean(raw.done),
+    run: runRaw
+      ? {
+          id: String(runRaw.id ?? ""),
+          status: String(runRaw.status ?? "running"),
+          stationsTotal: Number(runRaw.stationsTotal ?? 0) || 0,
+          stationsOk: Number(runRaw.stationsOk ?? 0) || 0,
+          stationsFailed: Number(runRaw.stationsFailed ?? 0) || 0
+        }
+      : null
   };
 }

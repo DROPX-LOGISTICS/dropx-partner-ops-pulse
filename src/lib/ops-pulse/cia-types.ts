@@ -57,7 +57,10 @@ export type CiaNetworkPayload = {
     startedAt?: string | null;
     stationsTotal: number;
     stationsOk: number;
+    stationsSucceeded?: number;
     stationsFailed: number;
+    stationsRetryQueued?: number;
+    stationsProcessing?: number;
   } | null;
 };
 

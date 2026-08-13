@@ -39,27 +39,39 @@ function formatRunStatus(status: string | null | undefined) {
 async function postCiaRefresh(stationCode?: string) {
   const response = await fetch("/api/ops-pulse/cod/cash-recon/cash-in-associate/refresh", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(stationCode ? { stationCode } : {})
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify(stationCode ? { stationCode } : {}),
+    cache: "no-store"
   });
-  const contentType = response.headers.get("content-type") ?? "";
   const text = await response.text();
   let payload: Record<string, unknown> = {};
-  if (contentType.includes("application/json") || (text && !/^\s*</.test(text))) {
-    try {
-      payload = text ? (JSON.parse(text) as Record<string, unknown>) : {};
-    } catch {
-      payload = {};
-    }
+  try {
+    payload = text && !/^\s*</.test(text) ? (JSON.parse(text) as Record<string, unknown>) : {};
+  } catch {
+    payload = {};
   }
   if (!response.ok) {
-    const raw = String(payload?.error ?? payload?.message ?? "");
-    if (/Worker exceeded resource limits/i.test(raw) || /<!DOCTYPE html/i.test(text) || /^\s*</.test(raw)) {
-      throw new Error(
-        "Cash recon worker hit resource limits. Try again in a minute, or use a shorter date range."
-      );
-    }
-    throw new Error(raw || `Refresh failed (${response.status})`);
+    throw new Error(String(payload.error ?? payload.message ?? text ?? `Refresh failed (${response.status})`));
+  }
+  return payload;
+}
+
+async function postCiaContinue() {
+  const response = await fetch("/api/ops-pulse/cod/cash-recon/cash-in-associate/continue", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({}),
+    cache: "no-store"
+  });
+  const text = await response.text();
+  let payload: Record<string, unknown> = {};
+  try {
+    payload = text && !/^\s*</.test(text) ? (JSON.parse(text) as Record<string, unknown>) : {};
+  } catch {
+    payload = {};
+  }
+  if (!response.ok) {
+    throw new Error(String(payload.error ?? payload.message ?? text ?? `Continue failed (${response.status})`));
   }
   return payload;
 }
@@ -146,13 +158,52 @@ export function CiaNetworkClient({
     }
   }
 
+  async function handleUpdateNumbers() {
+    if (busy) return;
+    setNotice(null);
+    const refreshRunning = String(runStatus ?? "").trim() === "running";
+    if (!refreshRunning) {
+      startTransition(() => router.refresh());
+      return;
+    }
+
+    setRefreshingAll(true);
+    try {
+      const result = await postCiaContinue();
+      const station = result.processedStation ? String(result.processedStation) : null;
+      const done = Boolean(result.done);
+      setNotice({
+        kind: station || done ? "ok" : "info",
+        title: done
+          ? "Network refresh finished"
+          : station
+            ? `Updated ${station}`
+            : "No station advanced",
+        detail: done
+          ? "All stations in this run are finished. Reloading numbers…"
+          : station
+            ? `${station} was fetched just now. Reloading page numbers…`
+            : "Refresh is still running, but this tick did not finish a station (another tick may own it, or the worker hit limits). Try again in a minute."
+      });
+      startTransition(() => router.refresh());
+    } catch (error) {
+      setNotice({
+        kind: "error",
+        title: "Could not advance refresh",
+        detail: error instanceof Error ? error.message : "Unknown continue error"
+      });
+    } finally {
+      setRefreshingAll(false);
+    }
+  }
+
   async function handleFullRefresh() {
     if (busy) return;
     const confirmed = window.confirm(
       "Refresh Cash In Associate for all stations?\n\n"
-      + "This starts a background run. Stations update one at a time "
-      + "(about every 3 minutes — roughly 2 hours for the full network). "
-      + "You can keep using this page; use “Update numbers” to see progress."
+      + "This starts a background run and fetches the first station now. "
+      + "More stations update one at a time (about every 3 minutes — roughly 2 hours for the full network). "
+      + "You can keep using this page; click “Update numbers” to fetch the next station immediately."
     );
     if (!confirmed) return;
 
@@ -164,13 +215,17 @@ export function CiaNetworkClient({
       const resumed = Boolean(result.resumed);
       const done = Number(run?.stationsOk ?? 0);
       const total = Number(run?.stationsTotal ?? stations.length) || stations.length;
+      const firstStation = result.processedStation ? String(result.processedStation) : null;
       setNotice({
         kind: "info",
         title: resumed ? "Network refresh continued" : "Network refresh started",
-        detail: run
-          ? `${done} of ${total} stations finished so far. `
-            + "New stations update about every 3 minutes — click “Update numbers” to check progress."
-          : String(result.message ?? "Network refresh accepted.")
+        detail: firstStation
+          ? `Processed ${firstStation} immediately (${done}/${total}). `
+            + "More stations continue about every 3 minutes — click “Update numbers” to advance one now."
+          : run
+            ? `${done} of ${total} stations finished so far. `
+              + "Click “Update numbers” to fetch the next station if progress stays stuck."
+            : String(result.message ?? "Network refresh accepted.")
       });
       startTransition(() => router.refresh());
     } catch (error) {
@@ -202,7 +257,7 @@ export function CiaNetworkClient({
               type="button"
               className="button secondary"
               disabled={busy}
-              onClick={() => startTransition(() => router.refresh())}
+              onClick={() => void handleUpdateNumbers()}
             >
               {pending && !refreshingAll && !refreshingStation ? <Loader2 size={16} className="cia-spin" /> : <RefreshCw size={16} />}
               Update numbers
