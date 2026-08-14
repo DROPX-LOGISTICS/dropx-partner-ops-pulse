@@ -20,7 +20,7 @@ import {
   writeDriverReconCache,
   type DriverReconClientPayload
 } from "@/lib/ops-pulse/driver-recon-client-cache";
-import { AssociateEntryBuilder, type AssociateOption } from "./associate-entry-builder";
+import { AssociateEntryBuilder, type AssociateOption, type SavedCashSummary } from "./associate-entry-builder";
 import { useRegisterCashStepRequired } from "./cash-step-gate";
 import { MissingDerPanel } from "./missing-der-panel";
 
@@ -254,6 +254,7 @@ export function CashCollectionWorkspace({
   locationId,
   returnHref,
   savedProviderEmployeeIds,
+  savedCashEntries = [],
   savedCount,
   stationCode,
   stationLabel,
@@ -266,6 +267,7 @@ export function CashCollectionWorkspace({
   locationId: string;
   returnHref: string;
   savedProviderEmployeeIds: string[];
+  savedCashEntries?: SavedCashSummary[];
   savedCount: number;
   stationCode: string;
   stationLabel: string;
@@ -551,6 +553,7 @@ export function CashCollectionWorkspace({
             businessDate={businessDate}
             canEdit={entryEnabled}
             initiallyHiddenProviderIds={savedProviderEmployeeIds}
+            savedCashEntries={savedCashEntries}
             locationId={locationId}
             returnHref={returnHref}
             stationCode={stationCode}
@@ -571,6 +574,7 @@ export function CashCollectionWorkspace({
           canEdit={entryEnabled}
           driversReady={driversReady}
           initiallyHiddenProviderIds={savedProviderEmployeeIds}
+          savedCashEntries={savedCashEntries}
           locationId={locationId}
           returnHref={returnHref}
           stationCode={stationCode}
