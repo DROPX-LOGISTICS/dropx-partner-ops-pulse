@@ -117,6 +117,18 @@ function isTransientPortalSessionError(message: string) {
     || normalized.includes("not authenticated");
 }
 
+function isTransientWorkerLimitError(message: string) {
+  const normalized = message.toLowerCase();
+  return normalized.includes("resource limit")
+    || normalized.includes("error 1102")
+    || normalized.includes("1102")
+    || normalized.includes("worker exceeded");
+}
+
+function isRetryableWorkerError(message: string) {
+  return isTransientPortalSessionError(message) || isTransientWorkerLimitError(message);
+}
+
 async function postWorker<T>(
   path: string,
   body: { stationCode: string; date: string } & Record<string, unknown>
@@ -125,9 +137,9 @@ async function postWorker<T>(
     return await postWorkerOnce<T>(path, body);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    // First hit after idle often races Amazon portal login; one retry usually succeeds.
-    if (!isTransientPortalSessionError(message)) throw error;
-    await new Promise((resolve) => setTimeout(resolve, 1500));
+    // First hit after idle often races Amazon portal login; 1102 is a Worker isolate kill.
+    if (!isRetryableWorkerError(message)) throw error;
+    await new Promise((resolve) => setTimeout(resolve, isTransientWorkerLimitError(message) ? 2500 : 1500));
     return postWorkerOnce<T>(path, body);
   }
 }
@@ -137,8 +149,8 @@ async function getWorker<T>(path: string, query?: Record<string, string>): Promi
     return await getWorkerOnce<T>(path, query);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    if (!isTransientPortalSessionError(message)) throw error;
-    await new Promise((resolve) => setTimeout(resolve, 1500));
+    if (!isRetryableWorkerError(message)) throw error;
+    await new Promise((resolve) => setTimeout(resolve, isTransientWorkerLimitError(message) ? 2500 : 1500));
     return getWorkerOnce<T>(path, query);
   }
 }
@@ -910,6 +922,17 @@ async function peekNextCiaStation(runId?: string, options?: { claim?: boolean })
   };
 }
 
+async function releaseCiaStationClaim(runId: string | undefined, stationCode: string) {
+  try {
+    await postWorkerJsonOnce("/api/admin/internal/cia-snapshot/release-claim", {
+      runId: runId || undefined,
+      stationCode
+    });
+  } catch (error) {
+    console.error("Failed to release CIA station claim", stationCode, error);
+  }
+}
+
 const CIA_REFRESH_CHUNK_DAYS = 7;
 
 function addDaysYmdLocal(ymd: string, days: number) {
@@ -1092,21 +1115,31 @@ export async function refreshCiaNetwork(): Promise<CiaNetworkRefreshResult> {
 
   const peek = await peekNextCiaStation(run?.id || undefined, { claim: true });
   if (peek.stationCode && !peek.done) {
-    const refreshed = await refreshCiaStation(
-      peek.stationCode,
-      peek.window ?? undefined
-    );
-    if (refreshed.snapshotStatus !== "ok") {
-      throw new Error(refreshed.error || `Failed to refresh ${peek.stationCode}`);
+    try {
+      const refreshed = await refreshCiaStation(
+        peek.stationCode,
+        peek.window ?? undefined
+      );
+      if (refreshed.snapshotStatus !== "ok") {
+        throw new Error(refreshed.error || `Failed to refresh ${peek.stationCode}`);
+      }
+      processedStation = refreshed.stationCode;
+      const after = await peekNextCiaStation(run?.id || refreshed.runId || undefined);
+      run = after.run ?? run;
+      refreshProgress = after.refreshProgress ?? refreshProgress;
+      const attempted = Number(refreshProgress?.stationsOk ?? 0) || 0;
+      const total = Number(refreshProgress?.stationsTotal ?? run?.stationsTotal ?? 0) || 0;
+      message = `Fresh snapshot run started; processed ${processedStation} (${attempted}/${total}). `
+        + "Next stations follow automatically while this page stays open.";
+    } catch (error) {
+      const errMessage = error instanceof Error ? error.message : String(error);
+      await releaseCiaStationClaim(peek.run?.id || run?.id, peek.stationCode);
+      if (!isRetryableWorkerError(errMessage)) throw error;
+      message = `Fresh snapshot run started. ${peek.stationCode} hit a temporary worker limit and will retry on the next station.`;
+      const after = await peekNextCiaStation(run?.id || undefined);
+      run = after.run ?? run;
+      refreshProgress = after.refreshProgress ?? refreshProgress;
     }
-    processedStation = refreshed.stationCode;
-    const after = await peekNextCiaStation(run?.id || refreshed.runId || undefined);
-    run = after.run ?? run;
-    refreshProgress = after.refreshProgress ?? refreshProgress;
-    const attempted = Number(refreshProgress?.stationsOk ?? 0) || 0;
-    const total = Number(refreshProgress?.stationsTotal ?? run?.stationsTotal ?? 0) || 0;
-    message = `Fresh snapshot run started; processed ${processedStation} (${attempted}/${total}). `
-      + "Next stations follow automatically while this page stays open.";
   } else {
     run = peek.run ?? run;
     refreshProgress = peek.refreshProgress ?? refreshProgress;
@@ -1139,6 +1172,7 @@ export async function continueCiaSnapshot(runId?: string): Promise<{
     stationsFailed: number;
   } | null;
   refreshProgress?: Record<string, unknown> | null;
+  error?: string | null;
 }> {
   const peek = await peekNextCiaStation(runId, { claim: true });
   if (peek.done || !peek.stationCode) {
@@ -1151,17 +1185,34 @@ export async function continueCiaSnapshot(runId?: string): Promise<{
     };
   }
 
-  const refreshed = await refreshCiaStation(peek.stationCode, peek.window ?? undefined);
-  if (refreshed.snapshotStatus !== "ok") {
-    throw new Error(refreshed.error || `Failed to refresh ${peek.stationCode}`);
-  }
+  try {
+    const refreshed = await refreshCiaStation(peek.stationCode, peek.window ?? undefined);
+    if (refreshed.snapshotStatus !== "ok") {
+      throw new Error(refreshed.error || `Failed to refresh ${peek.stationCode}`);
+    }
 
-  const after = await peekNextCiaStation(runId || refreshed.runId || undefined);
-  return {
-    status: "ok",
-    processedStation: refreshed.stationCode,
-    done: after.done,
-    run: after.run ?? peek.run,
-    refreshProgress: after.refreshProgress ?? peek.refreshProgress
-  };
+    const after = await peekNextCiaStation(runId || refreshed.runId || undefined);
+    return {
+      status: "ok",
+      processedStation: refreshed.stationCode,
+      done: after.done,
+      run: after.run ?? peek.run,
+      refreshProgress: after.refreshProgress ?? peek.refreshProgress
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await releaseCiaStationClaim(peek.run?.id || runId, peek.stationCode);
+    const after = await peekNextCiaStation(runId || peek.run?.id);
+    if (isRetryableWorkerError(message)) {
+      return {
+        status: "retry",
+        processedStation: peek.stationCode,
+        done: false,
+        run: after.run ?? peek.run,
+        refreshProgress: after.refreshProgress ?? peek.refreshProgress,
+        error: message
+      };
+    }
+    throw error;
+  }
 }
