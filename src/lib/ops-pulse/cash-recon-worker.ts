@@ -882,16 +882,19 @@ function parseWorkerRun(runRaw: unknown): CiaNetworkRefreshResult["run"] {
   };
 }
 
-async function peekNextCiaStation(runId?: string): Promise<{
+async function peekNextCiaStation(runId?: string, options?: { claim?: boolean }): Promise<{
   stationCode: string | null;
   done: boolean;
   run: CiaNetworkRefreshResult["run"];
   window: { from: string; to: string } | null;
   refreshProgress: Record<string, unknown> | null;
 }> {
+  const query: Record<string, string> = {};
+  if (runId) query.runId = runId;
+  if (options?.claim) query.claim = "1";
   const raw = await getWorker<Record<string, unknown>>(
     "/api/admin/internal/cia-snapshot/next-station",
-    runId ? { runId } : undefined
+    Object.keys(query).length ? query : undefined
   );
   const windowRaw = raw.window && typeof raw.window === "object"
     ? (raw.window as Record<string, unknown>)
@@ -1087,7 +1090,7 @@ export async function refreshCiaNetwork(): Promise<CiaNetworkRefreshResult> {
   let processedStation: string | null = null;
   let message = String(raw.message ?? "Snapshot run started.");
 
-  const peek = await peekNextCiaStation(run?.id || undefined);
+  const peek = await peekNextCiaStation(run?.id || undefined, { claim: true });
   if (peek.stationCode && !peek.done) {
     const refreshed = await refreshCiaStation(
       peek.stationCode,
@@ -1137,12 +1140,12 @@ export async function continueCiaSnapshot(runId?: string): Promise<{
   } | null;
   refreshProgress?: Record<string, unknown> | null;
 }> {
-  const peek = await peekNextCiaStation(runId);
+  const peek = await peekNextCiaStation(runId, { claim: true });
   if (peek.done || !peek.stationCode) {
     return {
       status: "ok",
       processedStation: null,
-      done: true,
+      done: peek.done,
       run: peek.run,
       refreshProgress: peek.refreshProgress
     };
