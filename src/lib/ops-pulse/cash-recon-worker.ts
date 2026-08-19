@@ -952,6 +952,16 @@ async function touchCiaStationClaim(runId: string | undefined, stationCode: stri
   }
 }
 
+async function touchCiaFrontendLease(runId?: string) {
+  try {
+    await postWorkerJsonOnce("/api/admin/internal/cia-snapshot/frontend-lease", {
+      runId: runId || undefined
+    });
+  } catch (error) {
+    console.error("Failed to touch CIA frontend lease", runId, error);
+  }
+}
+
 const CIA_REFRESH_CHUNK_DAYS = 7;
 
 function addDaysYmdLocal(ymd: string, days: number) {
@@ -1094,6 +1104,7 @@ export async function refreshCiaStation(
   const chunks = splitCiaYmdRange(window.from, window.to, CIA_REFRESH_CHUNK_DAYS);
   const parts: Array<Record<string, unknown>> = [];
   for (const chunk of chunks) {
+    await touchCiaFrontendLease(options?.runId);
     const raw = await getWorker<Record<string, unknown>>("/api/admin/executive/cash-in-associate", {
       stationCode: code,
       fromDate: chunk.from,
@@ -1133,6 +1144,8 @@ export async function refreshCiaNetwork(): Promise<CiaNetworkRefreshResult> {
   let refreshProgress = parseWorkerRefreshProgress(raw.refreshProgress);
   let processedStation: string | null = null;
   let message = String(raw.message ?? "Snapshot run started.");
+
+  await touchCiaFrontendLease(run?.id || undefined);
 
   const peek = await peekNextCiaStation(run?.id || undefined, { claim: true });
   if (peek.stationCode && !isNetworkRunDone(peek.done, peek.refreshProgress)) {
@@ -1196,6 +1209,7 @@ export async function continueCiaSnapshot(runId?: string): Promise<{
   refreshProgress?: Record<string, unknown> | null;
   error?: string | null;
 }> {
+  await touchCiaFrontendLease(runId);
   const peek = await peekNextCiaStation(runId, { claim: true });
   if (isNetworkRunDone(peek.done, peek.refreshProgress) || !peek.stationCode) {
     return {
